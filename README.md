@@ -18,8 +18,8 @@
    В Antigravity IDE по умолчанию отсутствует стандартный способ простого поиска, быстрого редактирования, а также удобного включения/выключения плагинов и навыков. Находить нужные инструменты и отключать их вручную в файловой системе сложно и неудобно. Менеджер предоставляет интуитивно понятную панель управления со списками и тумблерами.
 2. **Отключение неиспользуемых инструментов для оптимизации контекста**:
    ИИ-агенты автоматически загружают все доступные правила, навыки и воркфлоу, что может перегружать рабочий контекст ненужными инструкциями. Отключение неиспользуемых плагинов и навыков позволяет оптимизировать загружаемый в ИИ контекст. Включение и выключение плагина осуществляется путем физического перемещения его папки в специальное хранилище (Storage) и обратно.
-3. **Хаос в конфигурационных файлах и сложность переноса (Наведение порядка)**:
-   Без этого расширения практически невозможно быстро сориентироваться, где именно физически находятся ваши навыки (Skills), правила (Rules) и сценарии (Workflows) — в глобальной папке `.gemini`, внутри какого-то плагина или локально в проекте. Их ручной поиск и перенос через файловый менеджер превращается в рутину. Менеджер наводит **абсолютный порядок**: вы можете в один клик перемещать ресурсы между глобальным окружением, плагинами и открытыми рабочими областями, мгновенно открывать их папки на диске или редактировать код файлов прямо в редакторе. Обслуживание контекста ИИ становится приятным и структурированным.
+3. **Сложность навигации по навыкам и рутина при наведении порядка**:
+   В Antigravity IDE есть базовая поддержка воркфлоу, но для навыков (Skills) визуального отслеживания нет: без менеджера крайне тяжело быстро сориентироваться, какие из них активны, где именно они лежат и к какому плагину принадлежат. Попытка навести порядок вручную — например, перенести нужный навык или правило между плагинами, глобальной папкой `.gemini` и локальной папкой проекта `.agents` — требует ручного поиска файлов на диске и превращается в утомительную рутину. Менеджер наводит **полный порядок**: вы можете в один клик перемещать навыки, правила и воркфлоу между окружениями, быстро просматривать их код и открывать их папки в проводнике.
 
 ### Установка и скачивание
 
@@ -74,8 +74,8 @@
    By default, Antigravity IDE lacks a built-in interface to easily search, edit, enable, or disable global plugins and skills. Managing these items manually in the file system is difficult and slow. The manager solves this by providing a unified dashboard with quick toggles and tabs.
 2. **Disabling Unused Tools to Optimize Context**:
    AI agents automatically read all active rules, skills, and workflows in the system. Disabling unused plugins and skills helps optimize the active context loaded by the AI. Enabling and disabling is achieved by physically moving directory folders into offline storage and back.
-3. **Configuration File Chaos & Tedious Relocation (Bringing Order)**:
-   Without this extension, it is extremely difficult to keep track of where your skills, rules, and workflows are located—whether globally in `.gemini`, packaged inside a specific plugin, or locally within a project folder. Searching and moving them manually via the OS file manager is a tedious routine. The manager establishes **complete order and organization**: it allows you to relocate resources between global storage, plugins, and active workspace folders in a single click, quickly navigate to folders on disk, and edit files directly in the editor. Organizing your AI environment becomes effortless.
+3. **Difficulty in Skill Navigation & Tedious Maintenance (Bringing Order)**:
+   While Antigravity IDE provides basic support for workflows, it lacks visual tracking for skills (Skills). Without this manager, keeping track of active skills, where they are stored, and which plugin they belong to is a major challenge. Organizing your environment—such as manually moving skills or rules between global directories (`.gemini`), plugins, and local project folders (`.agents`)—requires tedious file searching and path resolution. The manager establishes **complete order**: you can relocate skills, rules, and workflows between environments with a single click, view their code, and quickly jump to their directories on disk.
 
 ### Installation & Download
 
