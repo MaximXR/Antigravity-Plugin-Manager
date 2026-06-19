@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/MaximXR/Antigravity-Plugin-Manager.git"
   },
-  "icon": "resources/plugin-manager-logo.png",
+  "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.90.0"
   },
