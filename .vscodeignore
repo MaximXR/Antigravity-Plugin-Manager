@@ -8,3 +8,4 @@ plugin_manager_debug.log
 .agents/**
 *.env*
 .env.ovsx
+temp_resources/**
