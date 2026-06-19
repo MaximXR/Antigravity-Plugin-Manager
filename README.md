@@ -18,8 +18,8 @@
    В Antigravity IDE по умолчанию отсутствует стандартный способ простого поиска, быстрого редактирования, а также удобного включения/выключения плагинов и навыков. Находить нужные инструменты и отключать их вручную в файловой системе сложно и неудобно. Менеджер предоставляет интуитивно понятную панель управления со списками и тумблерами.
 2. **Отключение неиспользуемых инструментов для оптимизации контекста**:
    ИИ-агенты автоматически загружают все доступные правила, навыки и воркфлоу, что может перегружать рабочий контекст ненужными инструкциями. Отключение неиспользуемых плагинов и навыков позволяет оптимизировать загружаемый в ИИ контекст. Включение и выключение плагина осуществляется путем физического перемещения его папки в специальное хранилище (Storage) и обратно.
-3. **Сложность навигации по навыкам и рутина при наведении порядка**:
-   В Antigravity IDE есть базовая поддержка воркфлоу, но для навыков (Skills) визуального отслеживания нет: без менеджера крайне тяжело быстро сориентироваться, какие из них активны, где именно они лежат и к какому плагину принадлежат. Попытка навести порядок вручную — например, перенести нужный навык или правило между плагинами, глобальной папкой `.gemini` и локальной папкой проекта `.agents` — требует ручного поиска файлов на диске и превращается в утомительную рутину. Менеджер наводит **полный порядок**: вы можете в один клик перемещать навыки, правила и воркфлоу между окружениями, быстро просматривать их код и открывать их папки в проводнике.
+3. **Рутина при наведении порядка и перемещении ресурсов**:
+   Хотя в Antigravity IDE есть встроенное отображение списка активных навыков, оно статично и не позволяет управлять их структурой. Попытка навести порядок вручную — например, перенести нужный навык или правило между плагинами, глобальной папкой `.gemini` и локальной папкой проекта `.agents` — требует ручного поиска файлов на диске и превращается в утомительную рутину. Менеджер наводит **полный порядок**: вы можете в один клик перемещать навыки, правила и воркфлоу между окружениями, быстро просматривать их код и открывать их папки в проводнике.
 
 ### Установка и скачивание
 
@@ -74,8 +74,8 @@
    By default, Antigravity IDE lacks a built-in interface to easily search, edit, enable, or disable global plugins and skills. Managing these items manually in the file system is difficult and slow. The manager solves this by providing a unified dashboard with quick toggles and tabs.
 2. **Disabling Unused Tools to Optimize Context**:
    AI agents automatically read all active rules, skills, and workflows in the system. Disabling unused plugins and skills helps optimize the active context loaded by the AI. Enabling and disabling is achieved by physically moving directory folders into offline storage and back.
-3. **Difficulty in Skill Navigation & Tedious Maintenance (Bringing Order)**:
-   While Antigravity IDE provides basic support for workflows, it lacks visual tracking for skills (Skills). Without this manager, keeping track of active skills, where they are stored, and which plugin they belong to is a major challenge. Organizing your environment—such as manually moving skills or rules between global directories (`.gemini`), plugins, and local project folders (`.agents`)—requires tedious file searching and path resolution. The manager establishes **complete order**: you can relocate skills, rules, and workflows between environments with a single click, view their code, and quickly jump to their directories on disk.
+3. **Tedious Relocation & Maintenance (Bringing Order)**:
+   Although Antigravity IDE has a basic display for active skills, it is static and does not allow you to manage their structure. Organizing your environment—such as manually moving skills or rules between global directories (`.gemini`), plugins, and local project folders (`.agents`)—requires tedious file searching and path resolution. The manager establishes **complete order**: you can relocate skills, rules, and workflows between environments with a single click, view their code, and quickly jump to their directories on disk.
 
 ### Installation & Download
 
