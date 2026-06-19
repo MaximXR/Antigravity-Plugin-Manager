@@ -1,0 +1,8 @@
+.git/**
+.gitignore
+.vscodeignore
+*.vsix
+dist/**
+build.bat
+plugin_manager_debug.log
+.agents/**

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Bottom Left Isometric Cube -->
+  <g transform="translate(3, 11)">
+    <path d="M4 1L0 3v4l4 2 4-2V3L4 1z" />
+    <line x1="4" y1="5" x2="4" y2="9" />
+    <line x1="0" y1="3" x2="4" y2="5" />
+    <line x1="8" y1="3" x2="4" y2="5" />
+  </g>
+  <!-- Bottom Right Isometric Cube -->
+  <g transform="translate(11, 11)">
+    <path d="M4 1L0 3v4l4 2 4-2V3L4 1z" />
+    <line x1="4" y1="5" x2="4" y2="9" />
+    <line x1="0" y1="3" x2="4" y2="5" />
+    <line x1="8" y1="3" x2="4" y2="5" />
+  </g>
+  <!-- Bottom Back Isometric Cube -->
+  <g transform="translate(7, 6)">
+    <path d="M4 1L0 3v4l4 2 4-2V3L4 1z" />
+    <line x1="4" y1="5" x2="4" y2="9" />
+    <line x1="0" y1="3" x2="4" y2="5" />
+    <line x1="8" y1="3" x2="4" y2="5" />
+  </g>
+  <!-- Top Floating Cube (The Plugin) -->
+  <g transform="translate(9, 1)">
+    <path d="M3 1L0 2.2v3l3 1.2 3-1.2V2.2L3 1z" stroke-width="2" />
+    <line x1="3" y1="3.4" x2="3" y2="6.4" />
+    <line x1="0" y1="2.2" x2="3" y2="3.4" />
+    <line x1="6" y1="2.2" x2="3" y2="3.4" />
+  </g>
+  <!-- Dotted insertion line -->
+  <path d="M12 7.5v2" stroke-dasharray="1.5 1.5" stroke-width="1.2" />
+</svg>

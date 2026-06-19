@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Left Hexagon -->
+  <path d="M 8.5 10 L 12 12 L 12 16 L 8.5 18 L 5 16 L 5 12 Z" />
+  <!-- Bottom Hexagon -->
+  <path d="M 12 16 L 15.5 18 L 15.5 22 L 12 24 L 8.5 22 L 8.5 18 Z" />
+  <!-- Right Hexagon -->
+  <path d="M 15.5 10 L 19 12 L 19 16 L 15.5 18 L 12 16 L 12 12 Z" />
+  <!-- Top Floating Hexagon -->
+  <path d="M 12 1 L 15.5 3 L 15.5 7 L 12 9 L 8.5 7 L 8.5 3 Z" stroke-width="2" />
+  <!-- Connection / Insertion indicator -->
+  <path d="M 12 9 V 13" stroke-dasharray="1.5 1.5" stroke-width="1.2" />
+</svg>

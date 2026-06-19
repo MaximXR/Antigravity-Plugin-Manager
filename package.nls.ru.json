@@ -1,0 +1,10 @@
+{
+  "extension.displayName": "Antigravity Plugin Manager (RU)",
+  "extension.description": "Управление глобальными плагинами и мониторинг размера контекста (навыки, правила, воркфлоу)",
+  "command.refresh": "Обновить список плагинов",
+  "command.selectStorage": "Выбрать папку хранилища...",
+  "viewsContainers.activitybar.title": "🧩 Плагины",
+  "views.plugin-manager.name": "Менеджер плагинов",
+  "config.storagePath.description": "Пользовательский абсолютный путь к папке хранения глобальных плагинов",
+  "config.language.description": "Язык интерфейса (auto: системный язык по умолчанию, либо ручной выбор)"
+}

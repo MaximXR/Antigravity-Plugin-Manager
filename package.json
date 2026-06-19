@@ -1,0 +1,83 @@
+{
+  "name": "antigravity-plugin-manager",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
+  "version": "1.0.0-dev",
+  "publisher": "MaximXR",
+  "license": "MIT",
+  "icon": "resources/plugin-manager-logo.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "antigravity",
+    "plugin-manager",
+    "plugins",
+    "context-stats",
+    "junctions"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravity-plugin-manager.refresh",
+        "title": "%command.refresh%",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravity-plugin-manager.selectStorage",
+        "title": "%command.selectStorage%",
+        "category": "Antigravity"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-plugin-manager-container",
+          "title": "%viewsContainers.activitybar.title%",
+          "icon": "resources/plugin-manager-just-toggle.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-plugin-manager-container": [
+        {
+          "type": "webview",
+          "id": "antigravity-plugin-manager.view",
+          "name": "%views.plugin-manager.name%"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Antigravity Plugin Manager",
+      "properties": {
+        "antigravity-plugin-manager.storagePath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.storagePath.description%"
+        },
+        "antigravity-plugin-manager.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "ru"
+          ],
+          "default": "auto",
+          "description": "%config.language.description%",
+          "enumItemLabels": {
+            "auto": "Default (Auto)",
+            "en": "English",
+            "ru": "Русский"
+          }
+        }
+      }
+    }
+  }
+}

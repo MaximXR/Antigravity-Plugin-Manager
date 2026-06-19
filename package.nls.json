@@ -1,0 +1,10 @@
+{
+  "extension.displayName": "Antigravity Plugin Manager",
+  "extension.description": "Manage global Antigravity plugins and monitor context size (skills, rules, workflows)",
+  "command.refresh": "Refresh Plugin List",
+  "command.selectStorage": "Select Storage Folder...",
+  "viewsContainers.activitybar.title": "🧩 Plugins",
+  "views.plugin-manager.name": "Plugin Manager",
+  "config.storagePath.description": "Custom absolute path for global plugins storage directory",
+  "config.language.description": "Interface language (auto: default system language, or choose manual)"
+}

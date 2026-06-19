@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.vsix
+plugin_manager_debug.log
+Thumbs.db
+desktop.ini
+*.tmp
+*.log

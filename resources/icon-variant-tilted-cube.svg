@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Three standard base blocks -->
+  <rect x="4" y="4" width="7" height="7" rx="1.5" />
+  <rect x="4" y="13" width="7" height="7" rx="1.5" />
+  <rect x="13" y="13" width="7" height="7" rx="1.5" />
+  <!-- Rotated top-right block (tilted cube/diamond plug) -->
+  <rect x="13.75" y="4.75" width="5.5" height="5.5" rx="1" transform="rotate(45 16.5 7.5)" stroke-width="2" />
+  <!-- Dotted path showing sliding/plugging in direction -->
+  <path d="M 14.5 9.5 L 12.5 11.5" stroke-dasharray="1.5 1.5" stroke-width="1.2" />
+</svg>
