@@ -2329,6 +2329,13 @@ function updateStatusBarItem(statusBarItem, context) {
 }
 
 function activate(context) {
+  // Check if we are running in Antigravity IDE
+  const isAntigravity = vscode.env.appName === 'Antigravity IDE' || (vscode.env.appName && vscode.env.appName.includes('Antigravity'));
+  if (!isAntigravity) {
+    vscode.window.showErrorMessage('Antigravity Plugin Manager is designed exclusively for Antigravity IDE and is not supported in standard VS Code.');
+    return;
+  }
+
   logDebug('Antigravity Plugin Manager activating...');
 
   const activePluginsPath = getActivePluginsPath();
