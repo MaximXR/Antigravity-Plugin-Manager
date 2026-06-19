@@ -1,6 +1,6 @@
 {
-  "extension.displayName": "Antigravity Plugin Manager (RU)",
-  "extension.description": "Управление глобальными плагинами и мониторинг размера контекста (навыки, правила, воркфлоу)",
+  "extension.displayName": "Antigravity Plugin & Skill Manager",
+  "extension.description": "Удобное управление, поиск, редактирование, включение и выключение глобальных плагинов и навыков в Antigravity IDE для оптимизации контекста",
   "command.refresh": "Обновить список плагинов",
   "command.selectStorage": "Выбрать папку хранилища...",
   "viewsContainers.activitybar.title": "🧩 Плагины",

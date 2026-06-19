@@ -1000,6 +1000,15 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
     const lang = getActiveLanguage();
 
     switch (message.command) {
+      case 'changeLanguage':
+        try {
+          const selectedLang = message.language;
+          await vscode.workspace.getConfiguration('antigravity-plugin-manager').update('language', selectedLang, vscode.ConfigurationTarget.Global);
+        } catch (e) {
+          logDebug(`Change language error: ${e.message}`);
+          vscode.window.showErrorMessage('Failed to change language: ' + e.message);
+        }
+        break;
       case 'ready':
         onUpdate();
         break;
@@ -2428,6 +2437,7 @@ function deactivate() {
 }
 
 function getHtmlContentShared(webview, context, lang) {
+  const configLang = vscode.workspace.getConfiguration('antigravity-plugin-manager').get('language', 'auto');
   const title = getTranslation('title', lang);
   const subtitle = getTranslation('subtitle', lang);
   const storagePathLabel = getTranslation('storagePath', lang);
@@ -2566,6 +2576,24 @@ function getHtmlContentShared(webview, context, lang) {
 
     .btn:hover {
       opacity: 0.9;
+    }
+
+    #lang-select {
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+
+    #lang-select:hover {
+      border-color: rgba(255, 255, 255, 0.12) !important;
+      background-color: rgba(255, 255, 255, 0.08) !important;
+    }
+
+    #lang-select:focus {
+      border-color: rgba(99, 102, 241, 0.5) !important;
+    }
+
+    #lang-select option {
+      background-color: var(--vscode-editor-background, #1e1e2e);
+      color: var(--text-main, #cbd5e1);
     }
 
     .btn-secondary {
@@ -3060,9 +3088,23 @@ function getHtmlContentShared(webview, context, lang) {
   <div class="container">
     <!-- Main view wrapper -->
     <div id="main-view">
-      <header>
-        <h1>${title}</h1>
-        <p class="subtitle">${subtitle}</p>
+      <header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+        <div style="flex: 1; min-width: 0;">
+          <h1>${title}</h1>
+          <p class="subtitle">${subtitle}</p>
+        </div>
+        <div class="lang-selector-container" style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          <select id="lang-select" style="background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 11px; padding: 4px 8px 4px 6px; border-radius: 6px; outline: none; cursor: pointer; transition: border-color 0.2s;">
+            <option value="auto" ${configLang === 'auto' ? 'selected' : ''}>Auto</option>
+            <option value="en" ${configLang === 'en' ? 'selected' : ''}>English</option>
+            <option value="ru" ${configLang === 'ru' ? 'selected' : ''}>Русский</option>
+          </select>
+        </div>
       </header>
 
       <div class="glass-card storage-section">
@@ -3283,6 +3325,10 @@ function getHtmlContentShared(webview, context, lang) {
 
     searchInput.addEventListener('input', () => {
       renderCurrentTab();
+    });
+
+    document.getElementById('lang-select').addEventListener('change', (e) => {
+      vscode.postMessage({ command: 'changeLanguage', language: e.target.value });
     });
 
     // Switch Tabs

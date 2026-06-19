@@ -19,9 +19,10 @@
   "keywords": [
     "antigravity",
     "plugin-manager",
+    "skill-manager",
     "plugins",
-    "context-stats",
-    "junctions"
+    "skills",
+    "context-management"
   ],
   "activationEvents": [
     "*"

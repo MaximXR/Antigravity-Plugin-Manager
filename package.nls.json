@@ -1,6 +1,6 @@
 {
-  "extension.displayName": "Antigravity Plugin Manager",
-  "extension.description": "Manage global Antigravity plugins and monitor context size (skills, rules, workflows)",
+  "extension.displayName": "Antigravity Plugin & Skill Manager",
+  "extension.description": "Convenient tool to search, edit, enable, and disable global plugins and skills in Antigravity IDE, optimizing the active context",
   "command.refresh": "Refresh Plugin List",
   "command.selectStorage": "Select Storage Folder...",
   "viewsContainers.activitybar.title": "🧩 Plugins",

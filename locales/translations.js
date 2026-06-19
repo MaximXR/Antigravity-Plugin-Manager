@@ -1,6 +1,6 @@
 const translations = {
   "en": {
-    "title": "Antigravity Plugin Manager",
+    "title": "Antigravity Plugin & Skill Manager",
     "subtitle": "Control your AI context by toggling global plugins and monitoring active resources",
     "storagePath": "Storage Directory",
     "changeStorage": "Select Storage...",
@@ -62,7 +62,7 @@ const translations = {
     "alreadyInFolder": "Item \"{itemId}\" is already in this folder."
   },
   "ru": {
-    "title": "Менеджер плагинов Antigravity",
+    "title": "Antigravity Plugin & Skill Manager",
     "subtitle": "Управляйте контекстом ИИ: переключайте глобальные плагины и мониторьте active-ресурсы",
     "storagePath": "Папка хранения",
     "changeStorage": "Выбрать папку...",
