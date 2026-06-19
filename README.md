@@ -21,14 +21,6 @@
 3. **Хаос в конфигурационных файлах и сложность переноса (Наведение порядка)**:
    Без этого расширения практически невозможно быстро сориентироваться, где именно физически находятся ваши навыки (Skills), правила (Rules) и сценарии (Workflows) — в глобальной папке `.gemini`, внутри какого-то плагина или локально в проекте. Их ручной поиск и перенос через файловый менеджер превращается в рутину. Менеджер наводит **абсолютный порядок**: вы можете в один клик перемещать ресурсы между глобальным окружением, плагинами и открытыми рабочими областями, мгновенно открывать их папки на диске или редактировать код файлов прямо в редакторе. Обслуживание контекста ИИ становится приятным и структурированным.
 
-### Скриншоты
-
-Панель управления (Webview):
-![Панель управления Менеджера плагинов](resources/screenshot-webview-ru.png)
-
-Боковая панель (Sidebar):
-![Боковая панель Менеджера плагинов](resources/screenshot-sidebar-ru.png)
-
 ### Установка и скачивание
 
 Готовый пакет расширения `.vsix` можно скачать со страницы релизов:
@@ -47,6 +39,14 @@
 - **Защита от перезаписи и дублирования**: Проверка путей при переносе, исключение текущего расположения из списка назначения и защита от перезаписи файла самим собой.
 - **Интеграция со статус-баром**: Кнопка в статус-баре с быстрым счетчиком активных плагинов и подробным всплывающим Markdown-списком.
 - **Премиальный UI**: Современный интерфейс с эффектом Glassmorphism, микро-анимациями и автоматическим выбором языка (RU/EN).
+
+### Скриншоты
+
+Панель управления (Webview):
+![Панель управления Менеджера плагинов](resources/screenshot-webview-ru.png)
+
+Боковая панель (Sidebar):
+![Боковая панель Менеджера плагинов](resources/screenshot-sidebar-ru.png)
 
 ### Системные требования и Совместимость
 
@@ -77,14 +77,6 @@
 3. **Configuration File Chaos & Tedious Relocation (Bringing Order)**:
    Without this extension, it is extremely difficult to keep track of where your skills, rules, and workflows are located—whether globally in `.gemini`, packaged inside a specific plugin, or locally within a project folder. Searching and moving them manually via the OS file manager is a tedious routine. The manager establishes **complete order and organization**: it allows you to relocate resources between global storage, plugins, and active workspace folders in a single click, quickly navigate to folders on disk, and edit files directly in the editor. Organizing your AI environment becomes effortless.
 
-### Screenshots
-
-Control Panel (Webview):
-![Plugin Manager Control Panel](resources/screenshot-webview-en.png)
-
-Sidebar:
-![Plugin Manager Sidebar](resources/screenshot-sidebar-en.png)
-
 ### Installation & Download
 
 You can download the compiled `.vsix` extension file from the GitHub releases page:
@@ -103,6 +95,14 @@ After downloading, install it in Antigravity IDE (via *Extensions* menu -> click
 - **Protection & Safeguards**: Conflict resolution warnings, dynamic source location filtering in the target pick menu, and self-move safeguards.
 - **Status Bar Indicator**: Quick active/total count button with a rich markdown hover tooltip.
 - **Premium UI**: Sleek glassmorphism layout, micro-animations, and automatic bilingual detection (RU/EN).
+
+### Screenshots
+
+Control Panel (Webview):
+![Plugin Manager Control Panel](resources/screenshot-webview-en.png)
+
+Sidebar:
+![Plugin Manager Sidebar](resources/screenshot-sidebar-en.png)
 
 ### Prerequisites & Compatibility
 
