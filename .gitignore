@@ -7,3 +7,5 @@ desktop.ini
 *.tmp
 *.log
 temp_resources/
+*.env*
+.env.ovsx
