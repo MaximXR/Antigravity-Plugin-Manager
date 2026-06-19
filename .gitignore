@@ -9,3 +9,4 @@ desktop.ini
 temp_resources/
 *.env*
 .env.ovsx
+drafts/
