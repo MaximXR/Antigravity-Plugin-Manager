@@ -1,4 +1,4 @@
-# Changelog
+# История изменений / Changelog
 
 ## 1.0.0
 

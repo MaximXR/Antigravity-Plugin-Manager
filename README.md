@@ -48,6 +48,9 @@
 Боковая панель (Sidebar):
 ![Боковая панель Менеджера плагинов](resources/screenshot-sidebar-ru.png)
 
+### Рекомендуемые расширения-компаньоны
+- **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — визуальный менеджер чатов и автоматический сборщик мусора для очистки диска от неиспользуемых диалогов ИИ.
+
 ### Системные требования и Совместимость
 
 - Совместимость: Antigravity IDE (Windows, macOS, Linux).
@@ -103,6 +106,9 @@ Control Panel (Webview):
 
 Sidebar:
 ![Plugin Manager Sidebar](resources/screenshot-sidebar-en.png)
+
+### Recommended Companion Extensions
+- **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — a visual dialogue history manager and garbage collector to clean up unused AI workspace files.
 
 ### Prerequisites & Compatibility
 
