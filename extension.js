@@ -10,7 +10,7 @@ let sidebarProvider = undefined;
 // Helper to log errors or debug info
 function logDebug(message) {
   try {
-    const logPath = path.join(__dirname, 'plugin_manager_debug.log');
+    const logPath = 'C:\\Users\\sss77\\.gemini\\antigravity-ide\\brain\\f0d196dd-9ce4-41b1-bc2f-a01fb3a41bb8\\scratch\\plugin_manager_debug.log';
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, 'utf8');
   } catch (e) {}
 }
@@ -72,6 +72,124 @@ function safeMoveDir(src, dest) {
       throw err;
     }
   }
+}
+
+function areFilesIdentical(file1, file2) {
+  try {
+    if (!fs.existsSync(file1) || !fs.existsSync(file2)) return false;
+    const stat1 = fs.statSync(file1);
+    const stat2 = fs.statSync(file2);
+    if (stat1.size !== stat2.size) return false;
+    const buf1 = fs.readFileSync(file1);
+    const buf2 = fs.readFileSync(file2);
+    return buf1.equals(buf2);
+  } catch (e) {
+    return false;
+  }
+}
+
+function getDirFilesRelative(dir, baseDir = dir) {
+  let files = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relPath = path.relative(baseDir, fullPath);
+    if (entry.isDirectory()) {
+      files.push({ relPath, isDirectory: true });
+      files = files.concat(getDirFilesRelative(fullPath, baseDir));
+    } else {
+      files.push({ relPath, isDirectory: false, fullPath });
+    }
+  }
+  return files;
+}
+
+function areDirsIdentical(dir1, dir2) {
+  try {
+    if (!fs.existsSync(dir1) || !fs.existsSync(dir2)) return false;
+    const files1 = getDirFilesRelative(dir1).sort((a, b) => a.relPath.localeCompare(b.relPath));
+    const files2 = getDirFilesRelative(dir2).sort((a, b) => a.relPath.localeCompare(b.relPath));
+    if (files1.length !== files2.length) return false;
+    for (let i = 0; i < files1.length; i++) {
+      if (files1[i].relPath !== files2[i].relPath) return false;
+      if (files1[i].isDirectory !== files2[i].isDirectory) return false;
+      if (!files1[i].isDirectory) {
+        const path2 = path.join(dir2, files2[i].relPath);
+        if (!areFilesIdentical(files1[i].fullPath, path2)) return false;
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function mergeDirs(src, dest) {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      mergeDirs(srcPath, destPath);
+    } else {
+      if (fs.existsSync(destPath)) {
+        const srcStat = fs.statSync(srcPath);
+        const destStat = fs.statSync(destPath);
+        if (srcStat.mtimeMs > destStat.mtimeMs) {
+          try {
+            fs.unlinkSync(destPath);
+            fs.copyFileSync(srcPath, destPath);
+          } catch (e) {
+            logDebug(`Merge copy file error: ${e.message}`);
+          }
+        }
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+  fs.rmSync(src, { recursive: true, force: true });
+}
+
+function scanConflicts(activePath, storagePath, category) {
+  const conflicts = [];
+  if (!fs.existsSync(activePath) || !fs.existsSync(storagePath)) {
+    return conflicts;
+  }
+  try {
+    const activeItems = fs.readdirSync(activePath);
+    for (const name of activeItems) {
+      const activeItemPath = path.join(activePath, name);
+      const storageItemPath = path.join(storagePath, name);
+      let existsInStorage = false;
+      try {
+        existsInStorage = fs.existsSync(storageItemPath);
+      } catch (e) {}
+      if (existsInStorage) {
+        let isIdentical = false;
+        const stat = fs.statSync(activeItemPath);
+        if (stat.isDirectory()) {
+          isIdentical = areDirsIdentical(activeItemPath, storageItemPath);
+        } else {
+          isIdentical = areFilesIdentical(activeItemPath, storageItemPath);
+        }
+        conflicts.push({
+          id: name,
+          category: category,
+          isDir: stat.isDirectory(),
+          isIdentical: isIdentical,
+          activePath: activeItemPath,
+          storagePath: storageItemPath
+        });
+      }
+    }
+  } catch (e) {
+    logDebug(`Error scanning conflicts for ${category}: ${e.message}`);
+  }
+  return conflicts;
 }
 
 // Get standard active path for global plugins
@@ -180,10 +298,12 @@ function readPluginInfo(pluginDir) {
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const sPath = path.join(skillsPath, entry.name);
-          const sInfo = readSkillInfo(sPath);
-          sInfo.id = entry.name;
-          sInfo.physicalPath = sPath;
-          skills.push(sInfo);
+          if (fs.existsSync(path.join(sPath, 'SKILL.md'))) {
+            const sInfo = readSkillInfo(sPath);
+            sInfo.id = entry.name;
+            sInfo.physicalPath = sPath;
+            skills.push(sInfo);
+          }
         }
       }
     } catch (e) {
@@ -306,29 +426,99 @@ function readPluginInfo(pluginDir) {
   };
 }
 
+// Helper to parse YAML frontmatter fields
+function parseFrontmatter(content) {
+  const result = { name: '', description: '' };
+  const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!yamlMatch) return result;
+
+  const yamlText = yamlMatch[1];
+  const lines = yamlText.split(/\r?\n/);
+  let currentKey = null;
+  let blockLines = [];
+  let blockType = null;
+
+  for (let line of lines) {
+    if (currentKey && blockType) {
+      const matchIndent = line.match(/^(\s+)(.*)/);
+      if (matchIndent && (line.trim().length > 0 || line === '')) {
+        blockLines.push(matchIndent[2]);
+        continue;
+      } else {
+        let val = blockLines.join(blockType.startsWith('|') ? '\n' : ' ').trim();
+        if (currentKey === 'description') result.description = val;
+        else if (currentKey === 'name') result.name = val;
+        currentKey = null;
+        blockLines = [];
+        blockType = null;
+      }
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIdx = line.indexOf(':');
+    if (separatorIdx === -1) continue;
+
+    const key = line.substring(0, separatorIdx).trim();
+    let val = line.substring(separatorIdx + 1).trim();
+
+    if (key === 'name' || key === 'description') {
+      currentKey = key;
+      if (val.startsWith('>') || val.startsWith('|')) {
+        blockType = val;
+        blockLines = [];
+      } else {
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1);
+        }
+        if (key === 'description') result.description = val;
+        else if (key === 'name') result.name = val;
+        currentKey = null;
+      }
+    }
+  }
+
+  if (currentKey && blockType) {
+    let val = blockLines.join(blockType.startsWith('|') ? '\n' : ' ').trim();
+    if (currentKey === 'description') result.description = val;
+    else if (currentKey === 'name') result.name = val;
+  }
+
+  return result;
+}
+
 // Read skill metadata (SKILL.md)
 function readSkillInfo(skillDir) {
   const name = path.basename(skillDir);
   let displayName = name;
   let description = '';
+  let resolvedName = name;
   const skillMdPath = path.join(skillDir, 'SKILL.md');
   if (fs.existsSync(skillMdPath)) {
     try {
       const content = fs.readFileSync(skillMdPath, 'utf8');
-      const titleMatch = content.match(/^#\s+(.+)$/m);
+      const titleMatch = content.match(/^#{1,6}\s+(.+)$/m);
       if (titleMatch) displayName = titleMatch[1].trim();
       
-      const cleanContent = content.replace(/^#\s+.+$/m, '').trim();
-      const firstParagraph = cleanContent.split('\n\n')[0] || '';
-      description = firstParagraph.replace(/\s+/g, ' ').substring(0, 150).trim();
-      if (description.length >= 148) description += '...';
+      const fm = parseFrontmatter(content);
+      if (fm.name) {
+        resolvedName = fm.name.trim();
+      }
+      if (fm.description) {
+        description = fm.description.replace(/\s+/g, ' ').trim();
+      } else {
+        const cleanContent = content.replace(/^#{1,6}\s+.+$/m, '').trim();
+        const firstParagraph = cleanContent.split('\n\n')[0] || '';
+        description = firstParagraph.replace(/\s+/g, ' ').trim();
+      }
     } catch (e) {
       logDebug(`Error parsing SKILL.md for ${name}: ${e.message}`);
     }
   }
   return {
     id: name,
-    name,
+    name: resolvedName,
     displayName,
     description: description || 'No description provided.'
   };
@@ -340,21 +530,29 @@ function readWorkflowInfo(workflowPath) {
   const name = path.basename(workflowPath, '.md');
   let displayName = name;
   let description = '';
+  let resolvedName = name;
   try {
     const content = fs.readFileSync(workflowPath, 'utf8');
-    const titleMatch = content.match(/^#\s+(.+)$/m);
+    const titleMatch = content.match(/^#{1,6}\s+(.+)$/m);
     if (titleMatch) displayName = titleMatch[1].trim();
     
-    const cleanContent = content.replace(/^#\s+.+$/m, '').trim();
-    const firstParagraph = cleanContent.split('\n\n')[0] || '';
-    description = firstParagraph.replace(/\s+/g, ' ').substring(0, 150).trim();
-    if (description.length >= 148) description += '...';
+    const fm = parseFrontmatter(content);
+    if (fm.name) {
+      resolvedName = fm.name.trim();
+    }
+    if (fm.description) {
+      description = fm.description.replace(/\s+/g, ' ').trim();
+    } else {
+      const cleanContent = content.replace(/^#{1,6}\s+.+$/m, '').trim();
+      const firstParagraph = cleanContent.split('\n\n')[0] || '';
+      description = firstParagraph.replace(/\s+/g, ' ').trim();
+    }
   } catch (e) {
     logDebug(`Error parsing workflow md for ${name}: ${e.message}`);
   }
   return {
     id: filename,
-    name,
+    name: resolvedName,
     displayName,
     description: description || 'No description provided.'
   };
@@ -491,12 +689,14 @@ function scanSkills(activePath, storagePath) {
       for (const item of items) {
         if (item.isDirectory()) {
           const skillDir = path.join(storagePath, item.name);
-          const skillInfo = readSkillInfo(skillDir);
-          skillInfo.id = item.name;
-          skillInfo.isEnabled = false;
-          skillInfo.physicalPath = skillDir;
-          skills.push(skillInfo);
-          seenNames.add(item.name);
+          if (fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+            const skillInfo = readSkillInfo(skillDir);
+            skillInfo.id = item.name;
+            skillInfo.isEnabled = false;
+            skillInfo.physicalPath = skillDir;
+            skills.push(skillInfo);
+            seenNames.add(item.name);
+          }
         }
       }
     } catch (e) {
@@ -523,7 +723,7 @@ function scanSkills(activePath, storagePath) {
           isDir = fs.statSync(activeItemPath).isDirectory();
         } catch (e) {}
 
-        if (isDir) {
+        if (isDir && fs.existsSync(path.join(activeItemPath, 'SKILL.md'))) {
           const skillInfo = readSkillInfo(activeItemPath);
           skillInfo.id = item.name;
           skillInfo.isEnabled = true;
@@ -617,6 +817,37 @@ function scanWorkflows(activePath, storagePath) {
   return workflows;
 }
 
+// Scan local workspace plugins
+function scanLocalPlugins() {
+  const localPlugins = [];
+  if (!vscode.workspace.workspaceFolders) return localPlugins;
+  
+  for (const folder of vscode.workspace.workspaceFolders) {
+    const wsRoot = folder.uri.fsPath;
+    const wsPluginsPath = path.join(wsRoot, '.agents', 'plugins');
+    if (fs.existsSync(wsPluginsPath)) {
+      try {
+        const items = fs.readdirSync(wsPluginsPath, { withFileTypes: true });
+        for (const item of items) {
+          if (item.isDirectory()) {
+            const pluginDir = path.join(wsPluginsPath, item.name);
+            const pluginInfo = readPluginInfo(pluginDir);
+            pluginInfo.id = `local-${folder.name}-${item.name}`;
+            pluginInfo.isEnabled = true;
+            pluginInfo.isLocal = true;
+            pluginInfo.workspaceName = folder.name;
+            pluginInfo.physicalPath = pluginDir;
+            localPlugins.push(pluginInfo);
+          }
+        }
+      } catch (e) {
+        logDebug(`Error scanning local plugins in ${folder.name}: ${e.message}`);
+      }
+    }
+  }
+  return localPlugins;
+}
+
 // Scan local workspace skills
 function scanLocalSkills() {
   const localSkills = [];
@@ -631,13 +862,15 @@ function scanLocalSkills() {
         for (const item of items) {
           if (item.isDirectory()) {
             const skillDir = path.join(wsSkillsPath, item.name);
-            const skillInfo = readSkillInfo(skillDir);
-            skillInfo.id = `local-${folder.name}-${item.name}`;
-            skillInfo.isEnabled = true;
-            skillInfo.isLocal = true;
-            skillInfo.workspaceName = folder.name;
-            skillInfo.physicalPath = skillDir;
-            localSkills.push(skillInfo);
+            if (fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+              const skillInfo = readSkillInfo(skillDir);
+              skillInfo.id = `local-${folder.name}-${item.name}`;
+              skillInfo.isEnabled = true;
+              skillInfo.isLocal = true;
+              skillInfo.workspaceName = folder.name;
+              skillInfo.physicalPath = skillDir;
+              localSkills.push(skillInfo);
+            }
           }
         }
       } catch (e) {
@@ -884,7 +1117,14 @@ class PluginManagerViewProvider {
       ? vscode.workspace.workspaceFolders.map(folder => folder.uri.fsPath) 
       : [];
 
-    const plugins = scanPlugins(activePluginsPath, storagePluginsPath);
+    const workspaceFolders = vscode.workspace.workspaceFolders 
+      ? vscode.workspace.workspaceFolders.map(folder => ({ name: folder.name, fsPath: folder.uri.fsPath }))
+      : [];
+
+    const globalPlugins = scanPlugins(activePluginsPath, storagePluginsPath);
+    const localPlugins = scanLocalPlugins();
+    localPlugins.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const plugins = [...globalPlugins, ...localPlugins];
     
     const globalSkills = scanSkills(activeSkillsPath, storageSkillsPath);
     const localSkills = scanLocalSkills();
@@ -898,13 +1138,20 @@ class PluginManagerViewProvider {
 
     const stats = getContextStats(plugins, skills, workflows, workspaceRoots);
 
+    const pluginConflicts = scanConflicts(activePluginsPath, storagePluginsPath, 'plugin');
+    const skillConflicts = scanConflicts(activeSkillsPath, storageSkillsPath, 'skill');
+    const workflowConflicts = scanConflicts(activeWorkflowsPath, storageWorkflowsPath, 'workflow');
+    const conflicts = [...pluginConflicts, ...skillConflicts, ...workflowConflicts];
+
     this._view.webview.postMessage({
       command: 'init',
       plugins,
       skills,
       workflows,
       stats,
-      storagePath
+      storagePath,
+      conflicts,
+      workspaceFolders
     });
   }
 }
@@ -925,7 +1172,14 @@ function sendPanelData(context) {
     ? vscode.workspace.workspaceFolders.map(folder => folder.uri.fsPath) 
     : [];
 
-  const plugins = scanPlugins(activePluginsPath, storagePluginsPath);
+  const workspaceFolders = vscode.workspace.workspaceFolders 
+    ? vscode.workspace.workspaceFolders.map(folder => ({ name: folder.name, fsPath: folder.uri.fsPath }))
+    : [];
+
+  const globalPlugins = scanPlugins(activePluginsPath, storagePluginsPath);
+  const localPlugins = scanLocalPlugins();
+  localPlugins.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const plugins = [...globalPlugins, ...localPlugins];
   
   const globalSkills = scanSkills(activeSkillsPath, storageSkillsPath);
   const localSkills = scanLocalSkills();
@@ -939,13 +1193,20 @@ function sendPanelData(context) {
 
   const stats = getContextStats(plugins, skills, workflows, workspaceRoots);
 
+  const pluginConflicts = scanConflicts(activePluginsPath, storagePluginsPath, 'plugin');
+  const skillConflicts = scanConflicts(activeSkillsPath, storageSkillsPath, 'skill');
+  const workflowConflicts = scanConflicts(activeWorkflowsPath, storageWorkflowsPath, 'workflow');
+  const conflicts = [...pluginConflicts, ...skillConflicts, ...workflowConflicts];
+
   activePanel.webview.postMessage({
     command: 'init',
     plugins,
     skills,
     workflows,
     stats,
-    storagePath
+    storagePath,
+    conflicts,
+    workspaceFolders
   });
 }
 
@@ -999,6 +1260,8 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
 
     const lang = getActiveLanguage();
 
+    logDebug(`setupWebviewMessagingShared: Received command '${message.command}' with data: ${JSON.stringify(message)}`);
+
     switch (message.command) {
       case 'changeLanguage':
         try {
@@ -1010,13 +1273,16 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         }
         break;
       case 'ready':
+        logDebug("Handling 'ready' command...");
         onUpdate();
         break;
       case 'refresh':
+        logDebug("Handling 'refresh' command...");
         onUpdate();
         break;
       case 'toggle':
         try {
+          logDebug(`Handling 'toggle' command: category=${message.category}, id=${message.id}, enable=${message.enable}`);
           if (message.category === 'skill') {
             await toggleItem(activeSkillsPath, storageSkillsPath, message.id, message.enable, lang, 'skill');
           } else if (message.category === 'workflow') {
@@ -1024,12 +1290,22 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
           } else {
             await toggleItem(activePluginsPath, storagePluginsPath, message.id, message.enable, lang, 'plugin');
           }
+          logDebug(`toggleItem successfully completed for id=${message.id}. Running onUpdate...`);
           onUpdate();
+          logDebug(`onUpdate finished for toggle id=${message.id}`);
         } catch (e) {
-          logDebug(`Toggle error: ${e.message}`);
-          const errMsg = getTranslation('errorToggle', lang).replace('{error}', e.message);
+          logDebug(`Toggle error caught: ${e.message}. Stack: ${e.stack}`);
+          let errMsg = '';
+          if (e.code === 'EPERM' || e.code === 'EACCES') {
+            errMsg = (lang === 'ru' 
+              ? `Не удалось изменить статус элемента: доступ запрещен или папка заблокирована другим процессом (например, терминалом или редактором). Пожалуйста, закройте все программы, использующие папку "${message.id}", и попробуйте снова.` 
+              : `Failed to toggle item: access denied or directory locked by another process (e.g., terminal or editor). Please close any programs using folder "${message.id}" and try again.`);
+          } else {
+            errMsg = getTranslation('errorToggle', lang).replace('{error}', e.message);
+          }
           vscode.window.showErrorMessage(errMsg);
           webview.postMessage({ command: 'error' });
+          onUpdate();
         }
         break;
       case 'selectStorage':
@@ -1077,6 +1353,156 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
           }
         }
         break;
+      case 'resolveConflict':
+        try {
+          const { id, category, resolution, activePath, storagePath, isDir } = message;
+          logDebug(`resolveConflict id=${id}, resolution=${resolution}, category=${category}`);
+          
+          if (resolution === 'merge') {
+            if (isDir) {
+              mergeDirs(storagePath, activePath);
+            } else {
+              const parsed = path.parse(storagePath);
+              const backupName = `${parsed.name}_backup_${Date.now()}${parsed.ext}`;
+              const backupPath = path.join(parsed.dir, backupName);
+              fs.renameSync(storagePath, backupPath);
+            }
+            vscode.window.showInformationMessage(getTranslation('mergeSuccess', lang));
+          } else if (resolution === 'active') {
+            if (fs.existsSync(storagePath)) {
+              fs.rmSync(storagePath, { recursive: true, force: true });
+            }
+            vscode.window.showInformationMessage(getTranslation('conflictResolved', lang));
+          } else if (resolution === 'storage') {
+            if (fs.existsSync(activePath)) {
+              fs.rmSync(activePath, { recursive: true, force: true });
+            }
+            vscode.window.showInformationMessage(getTranslation('conflictResolved', lang));
+          } else if (resolution === 'keepBoth') {
+            const parsed = path.parse(storagePath);
+            const backupName = `${parsed.name}_backup_${Date.now()}${parsed.ext}`;
+            const backupPath = path.join(parsed.dir, backupName);
+            fs.renameSync(storagePath, backupPath);
+            vscode.window.showInformationMessage(getTranslation('conflictResolved', lang));
+          }
+          onUpdate();
+        } catch (e) {
+          logDebug(`resolveConflict error: ${e.message}`);
+          vscode.window.showErrorMessage('Failed to resolve conflict: ' + e.message);
+        }
+        break;
+      case 'createItem':
+        try {
+          const { category, targetType, targetId, name, displayName, description, version, author, createScripts, createExamples, createDocs, createResources } = message;
+          logDebug(`createItem category=${category}, targetType=${targetType}, targetId=${targetId}, name=${name}`);
+          
+          let targetDir = '';
+          if (category === 'plugin') {
+            if (targetType === 'global') {
+              targetDir = path.join(activePluginsPath, name);
+            } else if (targetType === 'workspace') {
+              targetDir = path.join(targetId, '.agents', 'plugins', name);
+            }
+          } else if (category === 'skill') {
+            if (targetType === 'global') {
+              targetDir = path.join(activeSkillsPath, name);
+            } else if (targetType === 'workspace') {
+              targetDir = path.join(targetId, '.agents', 'skills', name);
+            } else if (targetType === 'plugin') {
+              const allPlugins = scanPlugins(activePluginsPath, storagePluginsPath);
+              const targetPlugin = allPlugins.find(p => p.id === targetId);
+              if (!targetPlugin) {
+                throw new Error('Target plugin not found: ' + targetId);
+              }
+              targetDir = path.join(targetPlugin.physicalPath, 'skills', name);
+            }
+          } else if (category === 'workflow') {
+            if (targetType === 'global') {
+              targetDir = activeWorkflowsPath;
+            } else if (targetType === 'workspace') {
+              targetDir = path.join(targetId, '.agents', 'workflows');
+            }
+          }
+
+          if (!targetDir) {
+            throw new Error(getTranslation('invalidPaths', lang));
+          }
+
+          if (category === 'workflow') {
+            const workflowFile = path.join(targetDir, `${name}.md`);
+            if (fs.existsSync(workflowFile)) {
+              throw new Error(`File ${name}.md already exists in destination.`);
+            }
+            if (!fs.existsSync(targetDir)) {
+              fs.mkdirSync(targetDir, { recursive: true });
+            }
+            const cleanTitle = displayName || name;
+            const nameField = displayName ? `name: "${displayName}"\n` : '';
+            const content = `---
+${nameField}description: "${escapeJsString(description || '')}"
+---
+
+#### ${cleanTitle}
+
+## Шаги / Steps
+1. Шаг первый...
+`;
+            fs.writeFileSync(workflowFile, content, 'utf8');
+            vscode.window.showInformationMessage(`Workflow "${name}" created successfully.`);
+          } else {
+            if (fs.existsSync(targetDir)) {
+              throw new Error(`Folder "${name}" already exists in destination.`);
+            }
+            fs.mkdirSync(targetDir, { recursive: true });
+            if (category === 'plugin') {
+              fs.mkdirSync(path.join(targetDir, 'skills'), { recursive: true });
+              fs.mkdirSync(path.join(targetDir, 'rules'), { recursive: true });
+              const manifest = {
+                name: name,
+                displayName: displayName || name,
+                description: description || '',
+                version: version || '1.0.0',
+                author: author || ''
+              };
+              fs.writeFileSync(path.join(targetDir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf8');
+              vscode.window.showInformationMessage(`Plugin "${name}" created successfully.`);
+            } else if (category === 'skill') {
+              if (createScripts) {
+                fs.mkdirSync(path.join(targetDir, 'scripts'), { recursive: true });
+              }
+              if (createExamples) {
+                fs.mkdirSync(path.join(targetDir, 'examples'), { recursive: true });
+              }
+              if (createDocs) {
+                fs.mkdirSync(path.join(targetDir, 'docs'), { recursive: true });
+              }
+              if (createResources) {
+                fs.mkdirSync(path.join(targetDir, 'resources'), { recursive: true });
+              }
+              const cleanTitle = displayName || name;
+              const nameField = displayName ? `name: "${displayName}"\n` : '';
+              const content = `---
+${nameField}description: "${escapeJsString(description || '')}"
+---
+
+#### ${cleanTitle}
+
+## Когда использовать (When to use)
+- Используй этот навык при...
+
+## Как использовать (How to use)
+1. Шаги...
+`;
+              fs.writeFileSync(path.join(targetDir, 'SKILL.md'), content, 'utf8');
+              vscode.window.showInformationMessage(`Skill "${name}" created successfully.`);
+            }
+          }
+          onUpdate();
+        } catch (e) {
+          logDebug(`createItem error: ${e.message}`);
+          vscode.window.showErrorMessage(getTranslation('errorCreate', lang).replace('{error}', e.message));
+        }
+        break;
       case 'openStorage':
         if (fs.existsSync(storagePath)) {
           vscode.env.openExternal(vscode.Uri.file(storagePath));
@@ -1093,7 +1519,10 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         break;
       case 'openItemFolder':
         let itemFolder = '';
-        if (message.isLocal && message.physicalPath) {
+        if (message.physicalPath && fs.existsSync(message.physicalPath)) {
+          const stat = fs.statSync(message.physicalPath);
+          itemFolder = stat.isDirectory() ? message.physicalPath : path.dirname(message.physicalPath);
+        } else if (message.isLocal && message.physicalPath) {
           itemFolder = message.physicalPath;
         } else if (message.category === 'skill') {
           itemFolder = message.isEnabled ? path.join(activeSkillsPath, message.id) : path.join(storageSkillsPath, message.id);
@@ -1168,6 +1597,134 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         }
         break;
 
+      case 'deleteItem':
+        try {
+          const { category, itemId, displayName, physicalPath } = message;
+          logDebug(`deleteItem: category=${category}, itemId=${itemId}, path=${physicalPath}`);
+          if (!physicalPath || !fs.existsSync(physicalPath)) {
+            throw new Error(lang === 'ru' ? 'Файл или папка не существует.' : 'File or directory does not exist.');
+          }
+
+          if (category === 'plugin') {
+            const optDeleteAll = lang === 'ru' ? 'Удалить всё' : 'Delete all';
+            const optMoveSkills = lang === 'ru' ? 'Переместить вложенные навыки' : 'Move nested skills';
+            
+            const skillsDir = path.join(physicalPath, 'skills');
+            const hasSkills = fs.existsSync(skillsDir) && fs.readdirSync(skillsDir).filter(f => {
+              const p = path.join(skillsDir, f);
+              return fs.statSync(p).isDirectory();
+            }).length > 0;
+
+            let choice;
+            if (hasSkills) {
+              choice = await vscode.window.showWarningMessage(
+                lang === 'ru' 
+                  ? `Удалить плагин "${displayName || itemId}"? Внутри него есть вложенные навыки. Вы можете переместить их перед удалением.`
+                  : `Delete plugin "${displayName || itemId}"? It contains nested skills. You can move them before deleting.`,
+                { modal: true },
+                optDeleteAll,
+                optMoveSkills
+              );
+            } else {
+              choice = await vscode.window.showWarningMessage(
+                lang === 'ru' 
+                  ? `Вы уверены, что хотите удалить плагин "${displayName || itemId}"?`
+                  : `Are you sure you want to delete plugin "${displayName || itemId}"?`,
+                { modal: true },
+                lang === 'ru' ? 'Да' : 'Yes'
+              );
+              if (choice === (lang === 'ru' ? 'Да' : 'Yes')) {
+                choice = optDeleteAll;
+              }
+            }
+
+            if (!choice) return;
+
+            if (choice === optMoveSkills) {
+              const optGlobal = lang === 'ru' ? 'Глобальные навыки' : 'Global Skills';
+              const optWorkspace = lang === 'ru' ? 'Навыки текущей рабочей области' : 'Workspace Skills';
+              
+              const destChoice = await vscode.window.showQuickPick(
+                [
+                  { label: optGlobal, id: 'global' },
+                  { label: optWorkspace, id: 'workspace' }
+                ],
+                { placeHolder: lang === 'ru' ? 'Выберите назначение для вложенных навыков' : 'Select destination for nested skills' }
+              );
+              
+              if (!destChoice) return;
+
+              let targetSkillsDir = '';
+              if (destChoice.id === 'global') {
+                targetSkillsDir = activeSkillsPath;
+              } else {
+                const wsFolder = vscode.workspace.workspaceFolders?.[0];
+                if (!wsFolder) {
+                  throw new Error(lang === 'ru' ? 'Нет открытой рабочей области.' : 'No open workspace folder.');
+                }
+                targetSkillsDir = path.join(wsFolder.uri.fsPath, '.agents', 'skills');
+              }
+
+              if (!fs.existsSync(targetSkillsDir)) {
+                fs.mkdirSync(targetSkillsDir, { recursive: true });
+              }
+
+              const files = fs.readdirSync(skillsDir);
+              for (const f of files) {
+                const srcPath = path.join(skillsDir, f);
+                if (fs.statSync(srcPath).isDirectory()) {
+                  let destPath = path.join(targetSkillsDir, f);
+                  let counter = 1;
+                  while (fs.existsSync(destPath)) {
+                    destPath = path.join(targetSkillsDir, `${f}-${counter}`);
+                    counter++;
+                  }
+                  fs.renameSync(srcPath, destPath);
+                }
+              }
+              
+              vscode.window.showInformationMessage(
+                lang === 'ru' ? 'Вложенные навыки успешно перемещены.' : 'Nested skills moved successfully.'
+              );
+            }
+
+            if (choice === optDeleteAll || choice === optMoveSkills) {
+              fs.rmSync(physicalPath, { recursive: true, force: true });
+              vscode.window.showInformationMessage(
+                lang === 'ru' ? `Плагин "${displayName || itemId}" успешно удален.` : `Plugin "${displayName || itemId}" deleted successfully.`
+              );
+              onUpdate();
+            }
+
+          } else {
+            const confirmMsg = lang === 'ru'
+              ? `Вы уверены, что хотите удалить ${category === 'skill' ? 'навык' : category === 'workflow' ? 'воркфлоу' : category === 'rule' ? 'правило' : 'хук'} "${displayName || itemId}"?`
+              : `Are you sure you want to delete ${category === 'skill' ? 'skill' : category === 'workflow' ? 'workflow' : category === 'rule' ? 'rule' : 'hook'} "${displayName || itemId}"?`;
+            
+            const choice = await vscode.window.showWarningMessage(
+              confirmMsg,
+              { modal: true },
+              lang === 'ru' ? 'Да' : 'Yes'
+            );
+
+            if (choice === (lang === 'ru' ? 'Да' : 'Yes')) {
+              if (fs.statSync(physicalPath).isDirectory()) {
+                fs.rmSync(physicalPath, { recursive: true, force: true });
+              } else {
+                fs.unlinkSync(physicalPath);
+              }
+              vscode.window.showInformationMessage(
+                lang === 'ru' ? 'Ресурс успешно удален.' : 'Resource deleted successfully.'
+              );
+              onUpdate();
+            }
+          }
+        } catch (e) {
+          logDebug(`deleteItem error: ${e.message}`);
+          vscode.window.showErrorMessage('Failed to delete item: ' + e.message);
+        }
+        break;
+
       case 'requestMove':
         try {
           const { itemId, category, sourcePluginId, isEnabled } = message;
@@ -1179,7 +1736,7 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
           
           // 1. Add "Global" option (only for skills and workflows, rules cannot be global)
           // Exclude if already global (not in a plugin and not local)
-          const isAlreadyGlobal = !sourcePluginId && !message.isLocal;
+          const isAlreadyGlobal = category !== 'plugin' ? (!sourcePluginId && !message.isLocal) : !message.isLocal;
           if (category !== 'rule' && !isAlreadyGlobal) {
             quickPickItems.push({
               label: lang === 'ru' ? '$(globe) Глобальный' : '$(globe) Global',
@@ -1189,11 +1746,11 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
             });
           }
           
-          // 2. Add Plugins option (only for skills and rules, workflows cannot reside in plugins)
-          if (category !== 'workflow') {
+          // 2. Add Plugins option (only for skills and rules, workflows and plugins cannot reside in plugins)
+          if (category !== 'workflow' && category !== 'plugin') {
             otherPlugins.forEach(p => {
               quickPickItems.push({
-                label: `$(package) ${p.displayName}`,
+                label: `$(extensions) ${p.displayName}`,
                 description: `ID: ${p.id}`,
                 id: p.id,
                 type: 'plugin'
@@ -1201,7 +1758,7 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
             });
           }
 
-          // 3. Add Workspace folders option (for skills, rules, workflows)
+          // 3. Add Workspace folders option (for skills, rules, workflows, plugins)
           if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
             vscode.workspace.workspaceFolders.forEach(folder => {
               // Exclude if item is already in this workspace
@@ -1246,6 +1803,8 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
                 sourcePath = isEnabled ? path.join(activeSkillsPath, itemId) : path.join(storageSkillsPath, itemId);
               } else if (category === 'workflow') {
                 sourcePath = isEnabled ? path.join(activeWorkflowsPath, itemId) : path.join(storageWorkflowsPath, itemId);
+              } else if (category === 'plugin') {
+                sourcePath = isEnabled ? path.join(activePluginsPath, itemId) : path.join(storagePluginsPath, itemId);
               }
             }
             
@@ -1260,9 +1819,15 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
                 targetParent = isEnabled ? activeSkillsPath : storageSkillsPath;
               } else if (category === 'workflow') {
                 targetParent = isEnabled ? activeWorkflowsPath : storageWorkflowsPath;
+              } else if (category === 'plugin') {
+                targetParent = isEnabled ? activePluginsPath : storagePluginsPath;
               }
             } else if (targetType === 'workspace') {
-              targetParent = path.join(targetId, '.agents', category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'));
+              if (category === 'plugin') {
+                targetParent = path.join(targetId, '.agents', 'plugins');
+              } else {
+                targetParent = path.join(targetId, '.agents', category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'));
+              }
             }
             
             if (!sourcePath || !targetParent) {
@@ -1317,6 +1882,7 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
           vscode.window.showErrorMessage(getTranslation('errorMove', lang).replace('{error}', e.message));
         }
         break;
+
     }
   });
 }
@@ -2310,7 +2876,9 @@ function updateStatusBarItem(statusBarItem, context) {
   const storagePluginsPath = getStorageSubpath(storagePath, 'plugins');
   const lang = getActiveLanguage();
 
-  const plugins = scanPlugins(activePath, storagePluginsPath);
+  const globalPlugins = scanPlugins(activePath, storagePluginsPath);
+  const localPlugins = scanLocalPlugins();
+  const plugins = [...globalPlugins, ...localPlugins];
   const activeCount = plugins.filter(p => p.isEnabled).length;
   const totalCount = plugins.length;
 
@@ -2460,6 +3028,10 @@ function getHtmlContentShared(webview, context, lang) {
   const captionSkills = getTranslation('captionSkills', lang);
   const captionWorkflows = getTranslation('captionWorkflows', lang);
 
+  const captionPluginsEsc = captionPlugins.replace(/"/g, '&quot;');
+  const captionSkillsEsc = captionSkills.replace(/"/g, '&quot;');
+  const captionWorkflowsEsc = captionWorkflows.replace(/"/g, '&quot;');
+
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -2484,6 +3056,11 @@ function getHtmlContentShared(webview, context, lang) {
       margin: 0;
       padding: 16px;
       overflow-x: hidden;
+      transition: opacity 0.15s ease-in-out;
+    }
+
+    body.loading {
+      opacity: 0;
     }
 
     .container {
@@ -2636,6 +3213,21 @@ function getHtmlContentShared(webview, context, lang) {
     .stat-emerald .stat-value { color: #34d399; }
     .stat-amber .stat-value { color: #fbbf24; }
 
+    #stats-block {
+      margin-top: 12px;
+      padding: 10px;
+      gap: 8px;
+    }
+
+    #stats-block .stat-box {
+      padding: 6px 4px;
+    }
+
+    #stats-block .stat-value {
+      font-size: 22px;
+      margin-bottom: 2px;
+    }
+
     /* Tabs Styling */
     .tabs-row {
       display: flex;
@@ -2659,6 +3251,125 @@ function getHtmlContentShared(webview, context, lang) {
       border-radius: 6px;
       cursor: pointer;
       transition: all 0.2s ease;
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .tab-help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 8px;
+      font-weight: bold;
+      color: rgba(255, 255, 255, 0.6);
+      cursor: help;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, background-color 0.2s, color 0.2s;
+      flex-shrink: 0;
+    }
+
+    .tab-btn.active .tab-help-icon {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .tab-help-icon:hover {
+      background: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+    }
+
+    /* Tooltip text */
+    .tab-help-icon::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 135%;
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      background: rgba(15, 15, 25, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #f1f5f9;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 11px;
+      font-weight: normal;
+      line-height: 1.4;
+      white-space: normal;
+      width: 220px;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      z-index: 1000;
+      text-transform: none;
+      text-align: left;
+    }
+
+    /* Tooltip arrow */
+    .tab-help-icon::before {
+      content: "";
+      position: absolute;
+      bottom: 110%;
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      border-width: 5px;
+      border-style: solid;
+      border-color: rgba(15, 15, 25, 0.95) transparent transparent transparent;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      z-index: 1000;
+    }
+
+    .tab-help-icon:hover::after,
+    .tab-help-icon:hover::before {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Prevent clipping on left/right edges */
+    #tab-btn-plugins .tab-help-icon::after {
+      left: 0;
+      transform: translateX(-20px) translateY(4px);
+    }
+    #tab-btn-plugins .tab-help-icon:hover::after {
+      transform: translateX(-20px) translateY(0);
+    }
+    #tab-btn-plugins .tab-help-icon::before {
+      left: 6px;
+      transform: translateX(0) translateY(4px);
+    }
+    #tab-btn-plugins .tab-help-icon:hover::before {
+      transform: translateX(0) translateY(0);
+    }
+
+    #tab-btn-workflows .tab-help-icon::after {
+      left: auto;
+      right: 0;
+      transform: translateX(20px) translateY(4px);
+    }
+    #tab-btn-workflows .tab-help-icon:hover::after {
+      transform: translateX(20px) translateY(0);
+    }
+    #tab-btn-workflows .tab-help-icon::before {
+      left: auto;
+      right: 6px;
+      transform: translateX(0) translateY(4px);
+    }
+    #tab-btn-workflows .tab-help-icon:hover::before {
+      transform: translateX(0) translateY(0);
     }
 
     .tab-btn.active {
@@ -2676,13 +3387,38 @@ function getHtmlContentShared(webview, context, lang) {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 8px;
+      margin-top: 12px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
     .list-title {
       font-size: 14px;
       font-weight: 600;
       color: #f1f5f9;
+    }
+
+    .list-section-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 600px) {
+      .list-section-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .list-section-controls {
+        justify-content: flex-start;
+        width: 100%;
+        margin-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        padding-top: 6px;
+      }
     }
 
     .search-box {
@@ -2709,6 +3445,12 @@ function getHtmlContentShared(webview, context, lang) {
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 12px;
       margin-top: 4px;
+      min-height: 100vh; /* Ensure page is always scrollable to the stats/tabs row */
+      align-content: start;
+    }
+
+    .plugin-list.force-single-column {
+      grid-template-columns: 1fr !important;
     }
 
     .plugin-card {
@@ -2739,15 +3481,59 @@ function getHtmlContentShared(webview, context, lang) {
       text-overflow: ellipsis;
     }
 
+    .plugin-command-line {
+      margin-top: 2px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+    }
+
+    .slash-cmd {
+      font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
+      font-size: 10px;
+      color: #818cf8;
+      background: rgba(99, 102, 241, 0.15);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      border: 1px solid rgba(99, 102, 241, 0.22);
+      display: inline-block;
+    }
+
     .plugin-desc {
       font-size: 11px;
-      color: var(--text-muted);
+      color: #cbd5e1;
       line-height: 1.35;
       margin-bottom: 4px;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+    }
+
+    .detailed-mode .plugin-desc {
+      display: block !important;
+      -webkit-line-clamp: unset !important;
+      overflow: visible !important;
+    }
+
+    .detailed-mode .plugin-name {
+      white-space: normal !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+    }
+
+    .plugin-human-title {
+      font-size: 10px;
+      color: var(--text-muted);
+      opacity: 0.5;
+      font-style: italic;
+      display: none;
+    }
+
+    .detailed-mode .plugin-human-title {
+      display: inline-block;
     }
 
     .plugin-details {
@@ -2759,8 +3545,9 @@ function getHtmlContentShared(webview, context, lang) {
 
     .card-right-group {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
       flex-shrink: 0;
     }
 
@@ -2768,6 +3555,49 @@ function getHtmlContentShared(webview, context, lang) {
       display: flex;
       align-items: center;
       gap: 4px;
+    }
+
+    .card-actions-row2 {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card-actions-row3 {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      align-self: flex-end;
+    }
+
+    .card-actions-bottom {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      align-self: center;
+    }
+
+    .hover-only {
+      opacity: 0;
+      transition: opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .hover-only:hover {
+      opacity: 1 !important;
+    }
+
+    .glass-card:hover .hover-only {
+      opacity: 1;
+    }
+
+    /* Plugin move button: only visible when hovered directly, not on card hover */
+    .plugin-move-btn {
+      opacity: 0;
+      transition: opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .plugin-move-btn:hover {
+      opacity: 1 !important;
     }
 
     .card-action-btn {
@@ -2792,11 +3622,37 @@ function getHtmlContentShared(webview, context, lang) {
       transform: scale(1.08);
     }
 
+    .copy-name-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      padding: 0;
+      margin-left: 2px;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    .copy-name-btn:hover {
+      opacity: 1 !important;
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
     .switch {
       position: relative;
       display: inline-block;
       width: 38px;
-      height: 20px;
+      height: 18px;
       flex-shrink: 0;
     }
 
@@ -2821,8 +3677,8 @@ function getHtmlContentShared(webview, context, lang) {
       content: "";
       height: 12px;
       width: 12px;
-      left: 3px;
-      bottom: 3px;
+      left: 2px;
+      bottom: 2px;
       background-color: #cbd5e1;
       transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
       border-radius: 50%;
@@ -2835,7 +3691,7 @@ function getHtmlContentShared(webview, context, lang) {
     }
 
     input:checked + .slider:before {
-      transform: translateX(18px);
+      transform: translateX(22px);
       background-color: #ffffff;
     }
 
@@ -3020,6 +3876,62 @@ function getHtmlContentShared(webview, context, lang) {
       padding-left: 6px;
     }
 
+    .detail-skills-header-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .detail-skills-left-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .detail-plugin-actions-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      padding-right: 8px;
+      margin-right: 4px;
+    }
+
+    .detail-skills-right-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 600px) {
+      .detail-skills-header-container {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .detail-skills-left-group {
+        justify-content: space-between;
+        width: 100%;
+      }
+      .detail-plugin-actions-group {
+        border-right: none;
+        padding-right: 0;
+        margin-right: 0;
+      }
+      .detail-skills-right-group {
+        justify-content: flex-start;
+        width: 100%;
+        margin-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        padding-top: 6px;
+      }
+    }
+
     .resource-list {
       display: flex;
       flex-direction: column;
@@ -3061,7 +3973,7 @@ function getHtmlContentShared(webview, context, lang) {
 
     .resource-desc {
       font-size: 10px;
-      color: var(--text-muted);
+      color: #cbd5e1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -3082,9 +3994,20 @@ function getHtmlContentShared(webview, context, lang) {
       text-decoration: underline;
       color: #a855f7;
     }
+
+    /* Modal Form Styles */
+    #create-modal input:focus, #create-modal select:focus, #create-modal textarea:focus {
+      border-color: rgba(99, 102, 241, 0.5) !important;
+      background-color: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    #create-modal select option {
+      background-color: var(--vscode-editor-background, #1e1e2e);
+      color: var(--text-main, #cbd5e1);
+    }
   </style>
 </head>
-<body>
+<body class="loading">
   <div class="container">
     <!-- Main view wrapper -->
     <div id="main-view">
@@ -3120,7 +4043,7 @@ function getHtmlContentShared(webview, context, lang) {
       </div>
 
       <!-- Restored 2x2 Grid Statistics -->
-      <div class="glass-card grid-stats">
+      <div class="glass-card grid-stats" id="stats-block">
         <div class="stat-box stat-blue">
           <span class="stat-value" id="val-plugins">0</span>
           <span class="stat-label">${statPlugins}</span>
@@ -3139,20 +4062,65 @@ function getHtmlContentShared(webview, context, lang) {
         </div>
       </div>
 
-      <!-- Tab Selection Row -->
-      <div class="tabs-row">
-        <button class="tab-btn active" id="tab-btn-plugins" onclick="switchTab('plugins')">${tabPlugins}</button>
-        <button class="tab-btn" id="tab-btn-skills" onclick="switchTab('skills')">${tabSkills}</button>
-        <button class="tab-btn" id="tab-btn-workflows" onclick="switchTab('workflows')">${tabWorkflows}</button>
+      <!-- Conflicts Section -->
+      <div id="conflict-section" style="display: none;" class="glass-card">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border-bottom: 1px solid rgba(239, 68, 68, 0.2); padding-bottom: 6px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span style="font-size: 12px; font-weight: 700; color: #f87171;">${getTranslation('conflictTitle', lang)}</span>
+        </div>
+        <div id="conflict-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
       </div>
 
-      <div class="list-subtitle-info" id="list-subtitle-info" style="font-size: 11px; color: var(--text-muted); font-style: italic; margin: 6px 0 10px 2px;">
-        ${captionPlugins}
+      <!-- Tab Selection Row -->
+      <div class="tabs-row">
+        <button class="tab-btn active" id="tab-btn-plugins" onclick="switchTab('plugins')">
+          <span>${tabPlugins}</span>
+          <span class="tab-help-icon" data-tooltip="${captionPluginsEsc}">?</span>
+        </button>
+        <button class="tab-btn" id="tab-btn-skills" onclick="switchTab('skills')">
+          <span>${tabSkills}</span>
+          <span class="tab-help-icon" data-tooltip="${captionSkillsEsc}">?</span>
+        </button>
+        <button class="tab-btn" id="tab-btn-workflows" onclick="switchTab('workflows')">
+          <span>${tabWorkflows}</span>
+          <span class="tab-help-icon" data-tooltip="${captionWorkflowsEsc}">?</span>
+        </button>
       </div>
 
       <div class="list-section-header">
         <div class="list-title" id="list-section-title">${tabPlugins}</div>
-        <button class="btn btn-secondary" style="padding: 4px 8px;" id="btn-refresh">${lang === 'ru' ? 'Обновить' : 'Refresh'}</button>
+        <div class="list-section-controls">
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-layout" onclick="toggleLayoutMode()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="18" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="18" rx="1"></rect>
+            </svg>
+            <span id="layout-mode-text">${lang === 'ru' ? 'В 1 колонку' : '1 Column'}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-view" onclick="toggleViewMode()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"></line>
+              <line x1="8" y1="12" x2="21" y2="12"></line>
+              <line x1="8" y1="18" x2="21" y2="18"></line>
+              <line x1="3" y1="6" x2="3.01" y2="6"></line>
+              <line x1="3" y1="12" x2="3.01" y2="12"></line>
+              <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </svg>
+            <span id="view-mode-text">${lang === 'ru' ? 'Подробно' : 'Detailed'}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center;" id="btn-refresh">${lang === 'ru' ? 'Обновить' : 'Refresh'}</button>
+          <button class="btn" id="btn-open-create-modal" style="padding: 5px 10px; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; height: 26px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>${getTranslation('btnCreateNew', lang)}</span>
+          </button>
+        </div>
       </div>
 
       <input type="text" class="search-box" id="search-input" placeholder="${lang === 'ru' ? 'Поиск...' : 'Search...'}">
@@ -3239,8 +4207,71 @@ function getHtmlContentShared(webview, context, lang) {
       </div>
 
       <div class="resource-section" id="detail-skills-section">
-        <div class="resource-section-title">${getTranslation('tabSkills', lang)}</div>
-        <div class="resource-list" id="detail-skills-list"></div>
+        <div class="detail-skills-header-container">
+          <div class="detail-skills-left-group">
+            <div class="resource-section-title" style="margin-bottom: 0;">${getTranslation('tabSkills', lang)}</div>
+            <!-- Group 1: Plugin Specific Actions -->
+            <div class="detail-plugin-actions-group">
+              <div id="detail-switch-container">
+                <label class="switch">
+                  <input type="checkbox" id="detail-plugin-toggle">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div id="detail-loader" style="display: none; padding-right: 6px;">
+                <div class="spinner-small"></div>
+              </div>
+              <button class="card-action-btn" id="detail-btn-move" title="${getTranslation('move', lang)}">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="17 8 21 12 17 16"></polyline>
+                  <line x1="3" y1="12" x2="21" y2="12"></line>
+                </svg>
+              </button>
+              <button class="card-action-btn" id="detail-btn-delete" title="${lang === 'ru' ? 'Удалить' : 'Delete'}">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
+              <button class="card-action-btn" id="btn-open-plugin-folder" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Group 2: Skills List Controls -->
+          <div class="detail-skills-right-group">
+            <button class="btn btn-secondary" style="padding: 3px 6px; font-size: 10px; height: 20px; display: flex; align-items: center; justify-content: center; gap: 3px;" id="detail-btn-toggle-layout" onclick="toggleDetailLayoutMode()">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="18" rx="1"></rect>
+                <rect x="14" y="3" width="7" height="18" rx="1"></rect>
+              </svg>
+              <span id="detail-layout-mode-text">${lang === 'ru' ? 'В 1 колонку' : '1 Column'}</span>
+            </button>
+            <button class="btn btn-secondary" style="padding: 3px 6px; font-size: 10px; height: 20px; display: flex; align-items: center; justify-content: center; gap: 3px;" id="detail-btn-toggle-view" onclick="toggleDetailViewMode()">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+              <span id="detail-view-mode-text">${lang === 'ru' ? 'Подробно' : 'Detailed'}</span>
+            </button>
+            <button class="btn btn-secondary" style="padding: 3px 6px; font-size: 10px; height: 20px; display: flex; align-items: center; justify-content: center;" onclick="vscode.postMessage({ command: 'refresh' })">${lang === 'ru' ? 'Обновить' : 'Refresh'}</button>
+            <button class="btn" style="padding: 3px 6px; font-size: 10px; display: flex; align-items: center; gap: 3px; font-weight: 500; height: 20px;" onclick="openCreateModal('skill', 'plugin', activePluginId)">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>${lang === 'ru' ? 'Создать навык' : 'Create Skill'}</span>
+            </button>
+          </div>
+        </div>
+        <div class="plugin-list" id="detail-skills-list"></div>
       </div>
       <div class="resource-section" id="detail-rules-section">
         <div class="resource-section-title">${getTranslation('rulesCount', lang)}</div>
@@ -3250,19 +4281,122 @@ function getHtmlContentShared(webview, context, lang) {
         <div class="resource-section-title">${getTranslation('hooks', lang)}</div>
         <div class="resource-list" id="detail-hooks-list"></div>
       </div>
+      </div>
+    </div>
+    
+    <!-- Create Resource Modal -->
+    <div id="create-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
+      <div class="glass-card" style="width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 14px; background: rgba(30, 30, 46, 0.85); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);">
+        <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: #f1f5f9; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px;">${getTranslation('modalCreateTitle', lang)}</h3>
+        
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label class="storage-title">${getTranslation('labelCategory', lang)}</label>
+          <select id="create-category" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; cursor: pointer; width: 100%;">
+            <option value="plugin">${getTranslation('tabPlugins', lang)}</option>
+            <option value="skill">${getTranslation('tabSkills', lang)}</option>
+            <option value="workflow">${getTranslation('tabWorkflows', lang)}</option>
+          </select>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label class="storage-title">${getTranslation('labelTarget', lang)}</label>
+          <select id="create-target" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; cursor: pointer; width: 100%;">
+            <option value="global">${getTranslation('optGlobalOption', lang)}</option>
+          </select>
+        </div>
+
+        <div id="field-folder-name-container" style="display: flex; flex-direction: column; gap: 4px;">
+          <label class="storage-title" id="lbl-name-field">${getTranslation('labelFolderName', lang)} <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="create-name" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; box-sizing: border-box; width: 100%;" placeholder="my-plugin-id">
+        </div>
+
+        <div id="field-display-name-container" style="display: flex; flex-direction: column; gap: 4px;">
+          <label class="storage-title">${getTranslation('labelDisplayName', lang)}</label>
+          <input type="text" id="create-display-name" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; box-sizing: border-box; width: 100%;" placeholder="My Plugin Display Name">
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label class="storage-title" id="lbl-desc-field">${getTranslation('labelDescription', lang)}</label>
+          <textarea id="create-description" rows="2" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; box-sizing: border-box; width: 100%; resize: vertical;" placeholder="Brief description..."></textarea>
+        </div>
+
+        <div id="plugin-fields-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label class="storage-title">${getTranslation('labelVersion', lang)}</label>
+            <input type="text" id="create-version" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; box-sizing: border-box; width: 100%;" placeholder="1.0.0" value="1.0.0">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label class="storage-title">${getTranslation('labelAuthor', lang)}</label>
+            <input type="text" id="create-author" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; box-sizing: border-box; width: 100%;" placeholder="Author name">
+          </div>
+        </div>
+
+        <div id="skill-fields-container" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="switch">
+              <input type="checkbox" id="create-scripts">
+              <span class="slider"></span>
+            </label>
+            <span style="font-size: 11px; color: var(--text-muted);">${lang === 'ru' ? 'Создать папку scripts (фоновые утилиты)' : 'Create scripts folder (background utilities)'}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="switch">
+              <input type="checkbox" id="create-examples">
+              <span class="slider"></span>
+            </label>
+            <span style="font-size: 11px; color: var(--text-muted);">${lang === 'ru' ? 'Создать папку examples (примеры)' : 'Create examples folder (examples)'}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="switch">
+              <input type="checkbox" id="create-docs">
+              <span class="slider"></span>
+            </label>
+            <span style="font-size: 11px; color: var(--text-muted);">${lang === 'ru' ? 'Создать папку docs (документация)' : 'Create docs folder (documentation)'}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="switch">
+              <input type="checkbox" id="create-resources">
+              <span class="slider"></span>
+            </label>
+            <span style="font-size: 11px; color: var(--text-muted);">${lang === 'ru' ? 'Создать папку resources (ресурсы)' : 'Create resources folder (resources)'}</span>
+          </div>
+        </div>
+
+        <div id="create-error-msg" style="display: none; font-size: 11px; color: #f87171; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 8px; border-radius: 6px;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px;">
+          <button class="btn btn-secondary" id="btn-cancel-create">${getTranslation('btnCancel', lang)}</button>
+          <button class="btn" id="btn-submit-create">${getTranslation('btnCreate', lang)}</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
     const vscode = acquireVsCodeApi();
+
+    window.copyText = function(btn, text) {
+      navigator.clipboard.writeText(text).then(() => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        setTimeout(() => {
+          btn.innerHTML = originalHtml;
+        }, 1500);
+      }).catch(err => {
+        console.error('Failed to copy text: ', err);
+      });
+    };
     
     // Lists data
     let pluginsData = [];
     let skillsData = [];
     let workflowsData = [];
+    let workspaceFoldersList = [];
+    let conflictsList = [];
     
     let currentTab = 'plugins';
     let activePluginId = null;
+    let hasScrolledToTabs = false;
 
     // DOM Elements
     const storagePathDisplay = document.getElementById('storage-path-display');
@@ -3294,14 +4428,39 @@ function getHtmlContentShared(webview, context, lang) {
           pluginsData = message.plugins || [];
           skillsData = message.skills || [];
           workflowsData = message.workflows || [];
+          workspaceFoldersList = message.workspaceFolders || [];
+          conflictsList = message.conflicts || [];
           
+          renderConflicts();
           renderCurrentTab();
+          
+          if (!hasScrolledToTabs) {
+            hasScrolledToTabs = true;
+            const statsBlock = document.getElementById('stats-block');
+            if (statsBlock) {
+              statsBlock.scrollIntoView({ block: 'start' });
+            }
+          }
+          document.body.classList.remove('loading');
           break;
         case 'error':
           // Re-enable checkboxes and hide loader on error
           document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = false);
           document.querySelectorAll('[id^="loader-"]').forEach(el => el.style.display = 'none');
           document.querySelectorAll('[id^="switch-container-"]').forEach(el => el.style.display = 'block');
+          
+          const dLoader = document.getElementById('detail-loader');
+          const dSwitch = document.getElementById('detail-switch-container');
+          if (dLoader && dSwitch && activePluginId) {
+            const plugin = pluginsData.find(p => p.id === activePluginId);
+            dLoader.style.display = 'none';
+            dSwitch.style.display = plugin && plugin.isLocal ? 'none' : 'block';
+            
+            const detailToggle = document.getElementById('detail-plugin-toggle');
+            if (detailToggle && plugin) {
+              detailToggle.checked = plugin.isEnabled;
+            }
+          }
           break;
       }
     });
@@ -3341,17 +4500,13 @@ function getHtmlContentShared(webview, context, lang) {
       document.getElementById('tab-btn-skills').classList.toggle('active', tabName === 'skills');
       document.getElementById('tab-btn-workflows').classList.toggle('active', tabName === 'workflows');
       
-      const subtitleInfo = document.getElementById('list-subtitle-info');
-      // Update heading text and subtitle info description
+      // Update heading text
       if (tabName === 'plugins') {
         listSectionTitle.textContent = '${tabPlugins}';
-        subtitleInfo.textContent = "${escapeJsString(captionPlugins)}";
       } else if (tabName === 'skills') {
         listSectionTitle.textContent = '${tabSkills}';
-        subtitleInfo.textContent = "${escapeJsString(captionSkills)}";
       } else if (tabName === 'workflows') {
         listSectionTitle.textContent = '${tabWorkflows}';
-        subtitleInfo.textContent = "${escapeJsString(captionWorkflows)}";
       }
       
       searchInput.value = '';
@@ -3367,6 +4522,15 @@ function getHtmlContentShared(webview, context, lang) {
       if (switchEl && loaderEl) {
         switchEl.style.display = 'none';
         loaderEl.style.display = 'block';
+      }
+      
+      if (activePluginId && activePluginId === itemId) {
+        const dSwitch = document.getElementById('detail-switch-container');
+        const dLoader = document.getElementById('detail-loader');
+        if (dSwitch && dLoader) {
+          dSwitch.style.display = 'none';
+          dLoader.style.display = 'block';
+        }
       }
       
       vscode.postMessage({ command: 'toggle', category: category, id: itemId, enable: enable });
@@ -3403,6 +4567,16 @@ function getHtmlContentShared(webview, context, lang) {
       });
     };
 
+    window.deleteItem = function(category, itemId, displayName, physicalPath) {
+      vscode.postMessage({
+        command: 'deleteItem',
+        category: category,
+        itemId: itemId,
+        displayName: displayName || itemId,
+        physicalPath: physicalPath || ''
+      });
+    };
+
     window.editMetadata = function(field) {
       if (!activePluginId) return;
       const plugin = pluginsData.find(p => p.id === activePluginId);
@@ -3426,6 +4600,10 @@ function getHtmlContentShared(webview, context, lang) {
 
     window.openPluginDetails = function(pluginId) {
       activePluginId = pluginId;
+      const detailContainer = document.getElementById('detail-view');
+      if (detailContainer) {
+        detailContainer.classList.toggle('detailed-mode', isDetailedView);
+      }
       renderCurrentTab();
     };
 
@@ -3469,36 +4647,141 @@ function getHtmlContentShared(webview, context, lang) {
       document.getElementById('meta-version').textContent = plugin.version || '1.0.0';
       document.getElementById('meta-author').textContent = plugin.author || '';
 
+      const openFolderBtn = document.getElementById('btn-open-plugin-folder');
+      if (openFolderBtn) {
+        openFolderBtn.onclick = () => {
+          openItemFolder('plugin', plugin.id, plugin.isEnabled, plugin.isLocal, plugin.physicalPath);
+        };
+      }
+
+      const detailToggle = document.getElementById('detail-plugin-toggle');
+      const detailSwitchContainer = document.getElementById('detail-switch-container');
+      const detailLoader = document.getElementById('detail-loader');
+      
+      if (detailSwitchContainer) {
+        detailSwitchContainer.style.display = plugin.isLocal ? 'none' : 'block';
+      }
+      if (detailLoader) {
+        detailLoader.style.display = 'none';
+      }
+
+      if (detailToggle) {
+        detailToggle.disabled = false;
+        detailToggle.checked = plugin.isEnabled;
+        detailToggle.onchange = (e) => {
+          toggleItem('plugin', plugin.id, e.target.checked);
+        };
+      }
+
+      const btnMove = document.getElementById('detail-btn-move');
+      if (btnMove) {
+        btnMove.onclick = () => {
+          moveItem(plugin.id, 'plugin', null, plugin.isEnabled, plugin.isLocal, plugin.physicalPath);
+        };
+      }
+
+      const btnDelete = document.getElementById('detail-btn-delete');
+      if (btnDelete) {
+        btnDelete.onclick = () => {
+          deleteItem('plugin', plugin.id, plugin.displayName, plugin.physicalPath);
+        };
+      }
+
       // Render Skills
       const hasSkills = plugin.skills && plugin.skills.length > 0;
       document.getElementById('detail-skills-section').style.display = hasSkills ? 'block' : 'none';
       const skillsContainer = document.getElementById('detail-skills-list');
       if (plugin.skills && plugin.skills.length > 0) {
-        skillsContainer.innerHTML = plugin.skills.map(s => \`
-          <div class="resource-item">
-            <div class="resource-info">
-              <div class="resource-name" title="\${escapeHtml(s.displayName)}">\${escapeHtml(s.displayName)}</div>
-              <div class="resource-desc" title="\${escapeHtml(s.description)}">\${escapeHtml(s.description)}</div>
+        skillsContainer.innerHTML = plugin.skills.map(s => {
+          return \`
+            <div class="glass-card plugin-card">
+              <div class="plugin-top">
+                <div class="plugin-meta">
+                  <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/\${s.name}">
+                    <span class="slash-cmd" style="font-size: 11px; padding: 2px 6px; font-weight: 700;">/\${s.name}</span>
+                    <button class="copy-name-btn" onclick="copyText(this, '/\${s.name}')" title="${lang === 'ru' ? 'Скопировать название' : 'Copy name'}">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="plugin-desc" title="\${escapeHtml(s.description)}">\${escapeHtml(s.description)}</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
+                    \${plugin.isLocal ? \`
+                      <div class="resource-tags" style="margin-top: 0;">
+                        <div class="res-tag active res-mcp" style="font-size: 10px; padding: 2px 5px;">
+                          <span class="res-indicator"></span>
+                          <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(plugin.workspaceName)}</span>
+                        </div>
+                      </div>
+                    \` : ''}
+                    <div class="plugin-human-title">
+                      \${escapeHtml(s.displayName)}
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="card-right-group">
+                  <div class="card-actions">
+                    <button class="card-action-btn" title="${getTranslation('openInEditor', lang)}" onclick="openFileInEditor('skill', '\${escapeQuotes(s.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                      </svg>
+                    </button>
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}" onclick="openItemFolder('skill', '\${s.id}', \${plugin.isEnabled}, \${plugin.isLocal ? 'true' : 'false'}, '\${escapeQuotes(s.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="card-actions-row3">
+                    <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${s.id}', 'skill', '\${plugin.id}', \${plugin.isEnabled}, \${plugin.isLocal ? 'true' : 'false'}, '\${escapeQuotes(s.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="17 8 21 12 17 16"></polyline>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                      </svg>
+                    </button>
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('skill', '\${s.id}', '\${escapeQuotes(s.displayName)}', '\${escapeQuotes(s.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="resource-actions">
-              <button class="card-action-btn" title="${getTranslation('openInEditor', lang)}" onclick="openFileInEditor('skill', '\${escapeQuotes(s.physicalPath)}')">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                  <line x1="16" y1="13" x2="8" y2="13"></line>
-                  <line x1="16" y1="17" x2="8" y2="17"></line>
-                  <polyline points="10 9 9 9 8 9"></polyline>
-                </svg>
-              </button>
-              <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${s.id}', 'skill', '\${plugin.id}', \${plugin.isEnabled})">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="17 8 21 12 17 16"></polyline>
-                  <line x1="3" y1="12" x2="21" y2="12"></line>
-                </svg>
-              </button>
-            </div>
-          </div>
-        \`).join('');
+          \`;
+        }).join('');
+
+        skillsContainer.classList.toggle('force-single-column', isDetailSingleColumn);
+        skillsContainer.classList.toggle('detailed-mode', isDetailDetailedView);
+        
+        // Sync layout button text
+        const layoutBtnText = document.getElementById('detail-layout-mode-text');
+        const layoutBtnIcon = document.getElementById('detail-btn-toggle-layout')?.querySelector('svg');
+        if (layoutBtnText && layoutBtnIcon) {
+          if (isDetailSingleColumn) {
+            layoutBtnText.textContent = "${lang === 'ru' ? 'В 2 колонки' : '2 Columns'}";
+            layoutBtnIcon.innerHTML = '<line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>';
+          } else {
+            layoutBtnText.textContent = "${lang === 'ru' ? 'В 1 колонку' : '1 Column'}";
+            layoutBtnIcon.innerHTML = '<rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="18" rx="1"></rect>';
+          }
+        }
+
+        // Sync view mode button text
+        const viewBtnText = document.getElementById('detail-view-mode-text');
+        if (viewBtnText) {
+          viewBtnText.textContent = isDetailDetailedView 
+            ? "${lang === 'ru' ? 'Компактно' : 'Compact'}" 
+            : "${lang === 'ru' ? 'Подробно' : 'Detailed'}";
+        }
       } else {
         skillsContainer.innerHTML = '<div class="no-data">${noSkills}</div>';
       }
@@ -3523,10 +4806,21 @@ function getHtmlContentShared(webview, context, lang) {
                   <polyline points="10 9 9 9 8 9"></polyline>
                 </svg>
               </button>
-              <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${r.id}', 'rule', '\${plugin.id}', \${plugin.isEnabled})">
+              <button class="card-action-btn" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}" onclick="openItemFolder('rule', '\${r.id}', \${plugin.isEnabled}, \${plugin.isLocal ? 'true' : 'false'}, '\${escapeQuotes(r.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+              <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${r.id}', 'rule', '\${plugin.id}', \${plugin.isEnabled}, \${plugin.isLocal ? 'true' : 'false'}, '\${escapeQuotes(r.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="17 8 21 12 17 16"></polyline>
                   <line x1="3" y1="12" x2="21" y2="12"></line>
+                </svg>
+              </button>
+              <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('rule', '\${r.id}', '\${escapeQuotes(r.displayName || r.id)}', '\${escapeQuotes(r.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
               </button>
             </div>
@@ -3555,6 +4849,17 @@ function getHtmlContentShared(webview, context, lang) {
                   <line x1="16" y1="13" x2="8" y2="13"></line>
                   <line x1="16" y1="17" x2="8" y2="17"></line>
                   <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </button>
+              <button class="card-action-btn" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}" onclick="openItemFolder('hook', '\${h.id}', \${plugin.isEnabled}, \${plugin.isLocal ? 'true' : 'false'}, '\${escapeQuotes(h.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+              <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('hook', '\${h.id}', '\${escapeQuotes(h.displayName || h.id)}', '\${escapeQuotes(h.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
               </button>
             </div>
@@ -3611,26 +4916,50 @@ function getHtmlContentShared(webview, context, lang) {
                 </div>
                 
                 <div class="card-right-group">
+                  <div class="card-actions-bottom">
+                    \${p.isLocal ? '' : \`
+                      <div id="switch-container-\${p.id}">
+                        <label class="switch">
+                          <input type="checkbox" \${p.isEnabled ? 'checked' : ''} onchange="toggleItem('plugin', '\${p.id}', this.checked)">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <div id="loader-\${p.id}" style="display: none; padding-right: 6px;">
+                        <div class="spinner-small"></div>
+                      </div>
+                    \`}
+                  </div>
                   <div class="card-actions">
-                    <button class="card-action-btn" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}" onclick="openItemFolder('plugin', '\${p.id}', \${p.isEnabled}, false, '\${escapeQuotes(p.physicalPath)}')">
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Открыть папку' : 'Open folder'}" onclick="openItemFolder('plugin', '\${p.id}', \${p.isEnabled}, \${p.isLocal ? 'true' : 'false'}, '\${escapeQuotes(p.physicalPath)}')">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                       </svg>
                     </button>
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('plugin', '\${p.id}', '\${escapeQuotes(p.displayName)}', '\${escapeQuotes(p.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </div>
-                  <div id="switch-container-\${p.id}">
-                    <label class="switch">
-                      <input type="checkbox" \${p.isEnabled ? 'checked' : ''} onchange="toggleItem('plugin', '\${p.id}', this.checked)">
-                      <span class="slider"></span>
-                    </label>
-                  </div>
-                  <div id="loader-\${p.id}" style="display: none; padding-right: 6px;">
-                    <div class="spinner-small"></div>
+                  <div class="card-actions-row3">
+                    <button class="card-action-btn plugin-move-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${p.id}', 'plugin', null, \${p.isEnabled}, \${p.isLocal ? 'true' : 'false'}, '\${escapeQuotes(p.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="17 8 21 12 17 16"></polyline>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                      </svg>
+                    </button>
                   </div>
                 </div>
               </div>
               
               <div class="resource-tags">
+                \${p.isLocal ? \`
+                  <div class="res-tag active res-mcp" style="font-size: 11px;">
+                    <span class="res-indicator"></span>
+                    <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(p.workspaceName)}</span>
+                  </div>
+                \` : ''}
                 <div class="res-tag \${hasSkills ? 'active' : ''}">
                   <span class="res-indicator"></span>
                   <span>\${p.skillsCount} \${p.skillsCount === 1 ? '${lang === 'ru' ? 'навык' : 'skill'}' : (p.skillsCount >= 2 && p.skillsCount <= 4 ? '${lang === 'ru' ? 'навыка' : 'skills'}' : '${lang === 'ru' ? 'навыков' : 'skills'}')}</span>
@@ -3671,16 +5000,29 @@ function getHtmlContentShared(webview, context, lang) {
             <div class="glass-card plugin-card">
               <div class="plugin-top">
                 <div class="plugin-meta">
-                  <div class="plugin-name" title="\${escapeHtml(s.displayName)}">\${escapeHtml(s.displayName)}</div>
+                  <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/\${s.name}">
+                    <span class="slash-cmd" style="font-size: 11px; padding: 2px 6px; font-weight: 700;">/\${s.name}</span>
+                    <button class="copy-name-btn" onclick="copyText(this, '/\${s.name}')" title="${lang === 'ru' ? 'Скопировать название' : 'Copy name'}">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                    </button>
+                  </div>
                   <div class="plugin-desc" title="\${escapeHtml(s.description)}">\${escapeHtml(s.description)}</div>
-                  \${s.isLocal ? \`
-                    <div class="resource-tags" style="margin-top: 4px;">
-                      <div class="res-tag active res-mcp" style="font-size: 11px;">
-                        <span class="res-indicator"></span>
-                        <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(s.workspaceName)}</span>
+                  <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
+                    \${s.isLocal ? \`
+                      <div class="resource-tags" style="margin-top: 0;">
+                        <div class="res-tag active res-mcp" style="font-size: 10px; padding: 2px 5px;">
+                          <span class="res-indicator"></span>
+                          <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(s.workspaceName)}</span>
+                        </div>
                       </div>
+                    \` : ''}
+                    <div class="plugin-human-title">
+                      \${escapeHtml(s.displayName)}
                     </div>
-                  \` : ''}
+                  </div>
                 </div>
                 
                 <div class="card-right-group">
@@ -3699,24 +5041,34 @@ function getHtmlContentShared(webview, context, lang) {
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                       </svg>
                     </button>
+                  </div>
+                  <div class="card-actions-bottom">
+                    \${s.isLocal ? '' : \`
+                      <div id="switch-container-\${s.id}">
+                        <label class="switch">
+                          <input type="checkbox" \${s.isEnabled ? 'checked' : ''} onchange="toggleItem('skill', '\${s.id}', this.checked)">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <div id="loader-\${s.id}" style="display: none; padding-right: 6px;">
+                        <div class="spinner-small"></div>
+                      </div>
+                    \`}
+                  </div>
+                  <div class="card-actions-row3">
                     <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${s.id}', 'skill', null, \${s.isEnabled}, \${s.isLocal ? 'true' : 'false'}, '\${escapeQuotes(s.physicalPath)}')">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="17 8 21 12 17 16"></polyline>
                         <line x1="3" y1="12" x2="21" y2="12"></line>
                       </svg>
                     </button>
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('skill', '\${s.id}', '\${escapeQuotes(s.displayName)}', '\${escapeQuotes(s.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </div>
-                  \${s.isLocal ? '' : \`
-                    <div id="switch-container-\${s.id}">
-                      <label class="switch">
-                        <input type="checkbox" \${s.isEnabled ? 'checked' : ''} onchange="toggleItem('skill', '\${s.id}', this.checked)">
-                        <span class="slider"></span>
-                      </label>
-                    </div>
-                    <div id="loader-\${s.id}" style="display: none; padding-right: 6px;">
-                      <div class="spinner-small"></div>
-                    </div>
-                  \`}
                 </div>
               </div>
             </div>
@@ -3740,16 +5092,29 @@ function getHtmlContentShared(webview, context, lang) {
             <div class="glass-card plugin-card">
               <div class="plugin-top">
                 <div class="plugin-meta">
-                  <div class="plugin-name" title="\${escapeHtml(w.displayName)}">\${escapeHtml(w.displayName)}</div>
+                  <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/\${w.name}">
+                    <span class="slash-cmd" style="font-size: 11px; padding: 2px 6px; font-weight: 700;">/\${w.name}</span>
+                    <button class="copy-name-btn" onclick="copyText(this, '/\${w.name}')" title="${lang === 'ru' ? 'Скопировать название' : 'Copy name'}">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                    </button>
+                  </div>
                   <div class="plugin-desc" title="\${escapeHtml(w.description)}">\${escapeHtml(w.description)}</div>
-                  \${w.isLocal ? \`
-                    <div class="resource-tags" style="margin-top: 4px;">
-                      <div class="res-tag active res-mcp" style="font-size: 11px;">
-                        <span class="res-indicator"></span>
-                        <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(w.workspaceName)}</span>
+                  <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
+                    \${w.isLocal ? \`
+                      <div class="resource-tags" style="margin-top: 0;">
+                        <div class="res-tag active res-mcp" style="font-size: 10px; padding: 2px 5px;">
+                          <span class="res-indicator"></span>
+                          <span>${lang === 'ru' ? 'Локальный' : 'Local'} • \${escapeHtml(w.workspaceName)}</span>
+                        </div>
                       </div>
+                    \` : ''}
+                    <div class="plugin-human-title">
+                      \${escapeHtml(w.displayName)}
                     </div>
-                  \` : ''}
+                  </div>
                 </div>
                 
                 <div class="card-right-group">
@@ -3768,24 +5133,35 @@ function getHtmlContentShared(webview, context, lang) {
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                       </svg>
                     </button>
+                  </div>
+                  <div class="card-actions-bottom">
+                    \${w.isLocal ? '' : \`
+                      <div id="switch-container-\${w.id}">
+                        <label class="switch">
+                          <input type="checkbox" \${w.isEnabled ? 'checked' : ''} onchange="toggleItem('workflow', '\${w.id}', this.checked)">
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      <div id="loader-\${w.id}" style="display: none; padding-right: 6px;">
+                        <div class="spinner-small"></div>
+                      </div>
+                    \`}
+                  </div>
+                  <div class="card-actions-row3">
                     <button class="card-action-btn" title="${getTranslation('move', lang)}" onclick="moveItem('\${w.id}', 'workflow', null, \${w.isEnabled}, \${w.isLocal ? 'true' : 'false'}, '\${escapeQuotes(w.physicalPath)}')">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="17 8 21 12 17 16"></polyline>
                         <line x1="3" y1="12" x2="21" y2="12"></line>
                       </svg>
                     </button>
+                    <button class="card-action-btn" title="${lang === 'ru' ? 'Удалить' : 'Delete'}" onclick="deleteItem('workflow', '\${w.id}', '\${escapeQuotes(w.displayName)}', '\${escapeQuotes(w.physicalPath)}')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </div>
-                  \${w.isLocal ? '' : \`
-                    <div id="switch-container-\${w.id}">
-                      <label class="switch">
-                        <input type="checkbox" \${w.isEnabled ? 'checked' : ''} onchange="toggleItem('workflow', '\${w.id}', this.checked)">
-                        <span class="slider"></span>
-                      </label>
-                    </div>
-                    <div id="loader-\${w.id}" style="display: none; padding-right: 6px;">
-                      <div class="spinner-small"></div>
-                    </div>
-                  \`}
+                </div>
                 </div>
               </div>
             </div>
@@ -3794,10 +5170,321 @@ function getHtmlContentShared(webview, context, lang) {
       }
 
     }
+
+    // --- Conflicts & Creation Wizard Functions ---
+    function renderConflicts() {
+      const section = document.getElementById('conflict-section');
+      const container = document.getElementById('conflict-list');
+      
+      if (!conflictsList || conflictsList.length === 0) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+      }
+      
+      section.style.display = 'block';
+      container.innerHTML = conflictsList.map(c => {
+        const itemType = c.category === 'plugin' ? '${getTranslation('tabPlugins', lang)}' : (c.category === 'skill' ? '${getTranslation('tabSkills', lang)}' : '${getTranslation('tabWorkflows', lang)}');
+        
+        let warningText = '${escapeJsString(getTranslation('conflictWarning', lang))}';
+        warningText = warningText.replace('{itemId}', c.id);
+        
+        const showMerge = c.isDir && !c.isIdentical;
+        const showKeepBoth = !c.isDir && !c.isIdentical;
+        
+        return \`
+          <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.15); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 11px; line-height: 1.4; color: #fda4af;">
+              <strong>[\${itemType}]</strong> \${warningText}
+              \${c.isIdentical ? '<span style="color: #34d399; font-weight: 500; margin-left: 6px;">(' + (lang === 'ru' ? 'Копии идентичны' : 'Copies are identical') + ')</span>' : ''}
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button class="btn" style="background: var(--success-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'active', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepActive', lang)}</button>
+              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'storage', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepStorage', lang)}</button>
+              \${showMerge ? \`
+                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'merge', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnMerge', lang)}</button>
+              \` : ''}
+              \${showKeepBoth ? \`
+                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'keepBoth', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepBoth', lang)}</button>
+              \` : ''}
+            </div>
+          </div>
+        \`;
+      }).join('');
+    }
+    
+    window.resolveConflict = function(id, category, resolution, activePath, storagePath, isDir) {
+      vscode.postMessage({
+        command: 'resolveConflict',
+        id: id,
+        category: category,
+        resolution: resolution,
+        activePath: activePath,
+        storagePath: storagePath,
+        isDir: isDir
+      });
+    };
+
+    let isDetailedView = false;
+    window.toggleViewMode = function() {
+      isDetailedView = !isDetailedView;
+      const listContainer = document.getElementById('plugin-list-container');
+      const detailContainer = document.getElementById('detail-view');
+      const btnText = document.getElementById('view-mode-text');
+      if (isDetailedView) {
+        listContainer.classList.add('detailed-mode');
+        if (detailContainer) detailContainer.classList.add('detailed-mode');
+        btnText.textContent = "${lang === 'ru' ? 'Компактно' : 'Compact'}";
+      } else {
+        listContainer.classList.remove('detailed-mode');
+        if (detailContainer) detailContainer.classList.remove('detailed-mode');
+        btnText.textContent = "${lang === 'ru' ? 'Подробно' : 'Detailed'}";
+      }
+    };
+
+    let isSingleColumn = false;
+    window.toggleLayoutMode = function() {
+      isSingleColumn = !isSingleColumn;
+      const listContainer = document.getElementById('plugin-list-container');
+      const btnText = document.getElementById('layout-mode-text');
+      const btnIcon = document.getElementById('btn-toggle-layout').querySelector('svg');
+      if (isSingleColumn) {
+        listContainer.classList.add('force-single-column');
+        btnText.textContent = "${lang === 'ru' ? 'В 2 колонки' : '2 Columns'}";
+        btnIcon.innerHTML = '<line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>';
+      } else {
+        listContainer.classList.remove('force-single-column');
+        btnText.textContent = "${lang === 'ru' ? 'В 1 колонку' : '1 Column'}";
+        btnIcon.innerHTML = '<rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="18" rx="1"></rect>';
+      }
+    };
+
+    let isDetailDetailedView = false;
+    window.toggleDetailViewMode = function() {
+      isDetailDetailedView = !isDetailDetailedView;
+      const listContainer = document.getElementById('detail-skills-list');
+      const btnText = document.getElementById('detail-view-mode-text');
+      if (isDetailDetailedView) {
+        listContainer.classList.add('detailed-mode');
+        if (btnText) btnText.textContent = "${lang === 'ru' ? 'Компактно' : 'Compact'}";
+      } else {
+        listContainer.classList.remove('detailed-mode');
+        if (btnText) btnText.textContent = "${lang === 'ru' ? 'Подробно' : 'Detailed'}";
+      }
+    };
+
+    let isDetailSingleColumn = false;
+    window.toggleDetailLayoutMode = function() {
+      isDetailSingleColumn = !isDetailSingleColumn;
+      const listContainer = document.getElementById('detail-skills-list');
+      const btnText = document.getElementById('detail-layout-mode-text');
+      const btnIcon = document.getElementById('detail-btn-toggle-layout')?.querySelector('svg');
+      if (isDetailSingleColumn) {
+        listContainer.classList.add('force-single-column');
+        if (btnText) btnText.textContent = "${lang === 'ru' ? 'В 2 колонки' : '2 Columns'}";
+        if (btnIcon) btnIcon.innerHTML = '<line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>';
+      } else {
+        listContainer.classList.remove('force-single-column');
+        if (btnText) btnText.textContent = "${lang === 'ru' ? 'В 1 колонку' : '1 Column'}";
+        if (btnIcon) btnIcon.innerHTML = '<rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="18" rx="1"></rect>';
+      }
+    };
+
+    const createModal = document.getElementById('create-modal');
+    const createCategorySelect = document.getElementById('create-category');
+    const createTargetSelect = document.getElementById('create-target');
+    const fieldFolderNameContainer = document.getElementById('field-folder-name-container');
+    const fieldDisplayNameContainer = document.getElementById('field-display-name-container');
+    const pluginFieldsContainer = document.getElementById('plugin-fields-container');
+    const skillFieldsContainer = document.getElementById('skill-fields-container');
+    const lblNameField = document.getElementById('lbl-name-field');
+    const createErrorMsg = document.getElementById('create-error-msg');
+    
+    document.getElementById('btn-open-create-modal').addEventListener('click', () => {
+      openCreateModal();
+    });
+    
+    document.getElementById('btn-cancel-create').addEventListener('click', () => {
+      closeCreateModal();
+    });
+    
+    document.getElementById('btn-submit-create').addEventListener('click', () => {
+      submitCreate();
+    });
+    
+    createCategorySelect.addEventListener('change', () => {
+      handleCategoryChange();
+    });
+    
+    window.openCreateModal = function(presetCategory = null, presetTargetType = null, presetTargetId = null) {
+      createErrorMsg.style.display = 'none';
+      createErrorMsg.textContent = '';
+      
+      document.getElementById('create-name').value = '';
+      document.getElementById('create-display-name').value = '';
+      document.getElementById('create-description').value = '';
+      document.getElementById('create-version').value = '1.0.0';
+      document.getElementById('create-author').value = '';
+      document.getElementById('create-scripts').checked = false;
+      document.getElementById('create-examples').checked = false;
+      document.getElementById('create-docs').checked = false;
+      document.getElementById('create-resources').checked = false;
+      
+      let defaultCat = presetCategory;
+      if (!defaultCat) {
+        defaultCat = 'plugin';
+        if (currentTab === 'skills') defaultCat = 'skill';
+        else if (currentTab === 'workflows') defaultCat = 'workflow';
+      }
+      createCategorySelect.value = defaultCat;
+      
+      handleCategoryChange();
+      
+      if (presetTargetType) {
+        for (let i = 0; i < createTargetSelect.options.length; i++) {
+          const opt = createTargetSelect.options[i];
+          const isPluginMatch = presetTargetType === 'plugin' && opt.getAttribute('data-id') === presetTargetId;
+          const isWorkspaceMatch = presetTargetType === 'workspace' && opt.getAttribute('data-id') === presetTargetId;
+          const isGlobalMatch = presetTargetType === 'global';
+          
+          if (opt.value === presetTargetType && (isGlobalMatch || isPluginMatch || isWorkspaceMatch)) {
+            createTargetSelect.selectedIndex = i;
+            break;
+          }
+        }
+      }
+      
+      createModal.style.display = 'flex';
+    }
+    
+    function closeCreateModal() {
+      createModal.style.display = 'none';
+    }
+    
+    function handleCategoryChange() {
+      const category = createCategorySelect.value;
+      createTargetSelect.innerHTML = '';
+      
+      const globalOption = document.createElement('option');
+      globalOption.value = 'global';
+      globalOption.textContent = '${getTranslation('optGlobalOption', lang)}';
+      createTargetSelect.appendChild(globalOption);
+      
+      workspaceFoldersList.forEach(folder => {
+        const opt = document.createElement('option');
+        opt.value = 'workspace';
+        opt.setAttribute('data-id', folder.fsPath);
+        let optText = '${escapeJsString(getTranslation('optWorkspace', lang))}';
+        optText = optText.replace('{name}', folder.name);
+        opt.textContent = optText;
+        createTargetSelect.appendChild(opt);
+      });
+      
+      if (category === 'skill') {
+        pluginsData.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = 'plugin';
+          opt.setAttribute('data-id', p.id);
+          let optText = '${escapeJsString(getTranslation('optPlugin', lang))}';
+          optText = optText.replace('{name}', p.displayName);
+          opt.textContent = optText;
+          createTargetSelect.appendChild(opt);
+        });
+      }
+      
+      // Update description required label asterisk dynamically
+      const descLabel = document.getElementById('lbl-desc-field');
+      descLabel.innerHTML = '${getTranslation('labelDescription', lang)}';
+      
+      if (category === 'plugin') {
+        lblNameField.innerHTML = '${getTranslation('labelFolderName', lang)} <span style="color: #ef4444;">*</span>';
+        fieldFolderNameContainer.style.display = 'flex';
+        fieldDisplayNameContainer.style.display = 'flex';
+        pluginFieldsContainer.style.display = 'grid';
+        skillFieldsContainer.style.display = 'none';
+      } else if (category === 'skill') {
+        lblNameField.innerHTML = '${getTranslation('labelFolderName', lang)} <span style="color: #ef4444;">*</span>';
+        fieldFolderNameContainer.style.display = 'flex';
+        fieldDisplayNameContainer.style.display = 'flex';
+        pluginFieldsContainer.style.display = 'none';
+        skillFieldsContainer.style.display = 'flex';
+      } else if (category === 'workflow') {
+        lblNameField.innerHTML = '${getTranslation('labelFileName', lang)} <span style="color: #ef4444;">*</span>';
+        fieldFolderNameContainer.style.display = 'flex';
+        fieldDisplayNameContainer.style.display = 'none';
+        pluginFieldsContainer.style.display = 'none';
+        skillFieldsContainer.style.display = 'none';
+      }
+    }
+    
+    function submitCreate() {
+      createErrorMsg.style.display = 'none';
+      createErrorMsg.textContent = '';
+      
+      const category = createCategorySelect.value;
+      const targetOption = createTargetSelect.options[createTargetSelect.selectedIndex];
+      if (!targetOption) {
+        showCreateError('No destination selected.');
+        return;
+      }
+      const targetType = targetOption.value;
+      const targetId = targetOption.getAttribute('data-id') || '';
+      
+      const name = document.getElementById('create-name').value.trim();
+      const displayName = document.getElementById('create-display-name').value.trim();
+      const description = document.getElementById('create-description').value.trim();
+      const version = document.getElementById('create-version').value.trim();
+      const author = document.getElementById('create-author').value.trim();
+      const createScripts = document.getElementById('create-scripts').checked;
+      const createExamples = document.getElementById('create-examples').checked;
+      const createDocs = document.getElementById('create-docs').checked;
+      const createResources = document.getElementById('create-resources').checked;
+      
+      if (!name) {
+        if (category === 'workflow') {
+          showCreateError('${getTranslation('validationFileEmpty', lang)}');
+        } else {
+          showCreateError('${getTranslation('validationFolderEmpty', lang)}');
+        }
+        return;
+      }
+      
+      const nameRegex = /^[a-zA-Z0-9_\\-]+$/;
+      if (!nameRegex.test(name)) {
+        showCreateError('${getTranslation('validationFolderFormat', lang)}');
+        return;
+      }
+
+      
+      vscode.postMessage({
+        command: 'createItem',
+        category,
+        targetType,
+        targetId,
+        name,
+        displayName,
+        description,
+        version,
+        author,
+        createScripts,
+        createExamples,
+        createDocs,
+        createResources
+      });
+      
+      closeCreateModal();
+    }
+    
+    function showCreateError(msg) {
+      createErrorMsg.textContent = msg;
+      createErrorMsg.style.display = 'block';
+    }
   </script>
 </body>
 </html>`;
 }
+
+
 
 module.exports = {
   activate,
