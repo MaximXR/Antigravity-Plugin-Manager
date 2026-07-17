@@ -74,27 +74,106 @@ function safeMoveDir(src, dest) {
   }
 }
 
-function createLink(target, link, isDirectory) {
-  const isWin = os.platform() === 'win32';
-  if (isDirectory) {
-    if (isWin) {
-      fs.symlinkSync(target, link, 'junction');
-    } else {
-      fs.symlinkSync(target, link, 'dir');
-    }
-  } else {
-    if (isWin) {
+function linkDirRecursively(src, dest) {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      linkDirRecursively(srcPath, destPath);
+    } else if (entry.isFile()) {
+      if (fs.existsSync(destPath)) {
+        try {
+          fs.unlinkSync(destPath);
+        } catch (e) {}
+      }
       try {
-        fs.symlinkSync(target, link, 'file');
+        fs.linkSync(srcPath, destPath);
       } catch (err) {
         try {
-          fs.linkSync(target, link);
-        } catch (linkErr) {
+          fs.copyFileSync(srcPath, destPath);
+        } catch (copyErr) {
+          logDebug(`Error copying file recursively: ${copyErr.message}`);
+        }
+      }
+    }
+  }
+}
+
+function syncBackDir(activeDir, storageDir) {
+  if (!fs.existsSync(activeDir)) return;
+  if (!fs.existsSync(storageDir)) {
+    fs.mkdirSync(storageDir, { recursive: true });
+  }
+  const entries = fs.readdirSync(activeDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const activePath = path.join(activeDir, entry.name);
+    const storagePath = path.join(storageDir, entry.name);
+    if (entry.isDirectory()) {
+      syncBackDir(activePath, storagePath);
+    } else if (entry.isFile()) {
+      let isHardLinked = false;
+      try {
+        if (fs.existsSync(storagePath)) {
+          const statActive = fs.statSync(activePath);
+          const statStorage = fs.statSync(storagePath);
+          isHardLinked = (statActive.ino === statStorage.ino && statActive.dev === statStorage.dev);
+        }
+      } catch (e) {}
+
+      if (!isHardLinked) {
+        try {
+          if (fs.existsSync(storagePath)) {
+            const statActive = fs.statSync(activePath);
+            const statStorage = fs.statSync(storagePath);
+            if (statActive.mtimeMs > statStorage.mtimeMs) {
+              fs.unlinkSync(storagePath);
+              fs.copyFileSync(activePath, storagePath);
+            }
+          } else {
+            fs.copyFileSync(activePath, storagePath);
+          }
+        } catch (e) {
+          logDebug(`Error syncing back file ${entry.name}: ${e.message}`);
+        }
+      }
+    }
+  }
+}
+
+function createLink(target, link, isDirectory, category) {
+  const isWin = os.platform() === 'win32';
+  if (isDirectory) {
+    if (category === 'skill') {
+      linkDirRecursively(target, link);
+    } else {
+      if (isWin) {
+        fs.symlinkSync(target, link, 'junction');
+      } else {
+        fs.symlinkSync(target, link, 'dir');
+      }
+    }
+  } else {
+    // For files, we prefer hard links so they act like normal files to the IDE
+    try {
+      fs.linkSync(target, link);
+    } catch (err) {
+      if (isWin) {
+        try {
+          fs.symlinkSync(target, link, 'file');
+        } catch (symErr) {
+          throw new Error('CROSS_DRIVE_FILE_LINK_FAILED');
+        }
+      } else {
+        try {
+          fs.symlinkSync(target, link, 'file');
+        } catch (symErr) {
           throw new Error('CROSS_DRIVE_FILE_LINK_FAILED');
         }
       }
-    } else {
-      fs.symlinkSync(target, link, 'file');
     }
   }
 }
@@ -1040,7 +1119,7 @@ async function toggleItem(activePath, storagePath, itemId, enable, lang, categor
       }
 
       try {
-        createLink(storageItemPath, activeItemPath, isDir);
+        createLink(storageItemPath, activeItemPath, isDir, category);
       } catch (err) {
         if (err.message === 'CROSS_DRIVE_FILE_LINK_FAILED') {
           fs.copyFileSync(storageItemPath, activeItemPath);
@@ -1075,13 +1154,40 @@ async function toggleItem(activePath, storagePath, itemId, enable, lang, categor
         fs.unlinkSync(activeItemPath);
       } else {
         if (isDir) {
-          if (fs.existsSync(storageItemPath)) {
-            const backupPath = storageItemPath + '_bak_' + Date.now();
-            fs.renameSync(storageItemPath, backupPath);
+          if (category === 'skill') {
+            syncBackDir(activeItemPath, storageItemPath);
+            fs.rmSync(activeItemPath, { recursive: true, force: true });
+          } else {
+            if (fs.existsSync(storageItemPath)) {
+              const backupPath = storageItemPath + '_bak_' + Date.now();
+              fs.renameSync(storageItemPath, backupPath);
+            }
+            safeMoveDir(activeItemPath, storageItemPath);
           }
-          safeMoveDir(activeItemPath, storageItemPath);
         } else {
-          fs.copyFileSync(activeItemPath, storageItemPath);
+          // It is a file (workflow)
+          let isHardLinked = false;
+          try {
+            if (fs.existsSync(storageItemPath)) {
+              const statActive = fs.statSync(activeItemPath);
+              const statStorage = fs.statSync(storageItemPath);
+              isHardLinked = (statActive.ino === statStorage.ino && statActive.dev === statStorage.dev);
+            }
+          } catch (e) {}
+
+          if (!isHardLinked) {
+            try {
+              if (fs.existsSync(storageItemPath)) {
+                const statActive = fs.statSync(activeItemPath);
+                const statStorage = fs.statSync(storageItemPath);
+                if (statActive.mtimeMs > statStorage.mtimeMs) {
+                  fs.copyFileSync(activeItemPath, storageItemPath);
+                }
+              } else {
+                fs.copyFileSync(activeItemPath, storageItemPath);
+              }
+            } catch (e) {}
+          }
           fs.unlinkSync(activeItemPath);
         }
       }
