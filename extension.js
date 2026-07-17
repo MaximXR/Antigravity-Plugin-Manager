@@ -74,6 +74,31 @@ function safeMoveDir(src, dest) {
   }
 }
 
+function createLink(target, link, isDirectory) {
+  const isWin = os.platform() === 'win32';
+  if (isDirectory) {
+    if (isWin) {
+      fs.symlinkSync(target, link, 'junction');
+    } else {
+      fs.symlinkSync(target, link, 'dir');
+    }
+  } else {
+    if (isWin) {
+      try {
+        fs.symlinkSync(target, link, 'file');
+      } catch (err) {
+        try {
+          fs.linkSync(target, link);
+        } catch (linkErr) {
+          throw new Error('CROSS_DRIVE_FILE_LINK_FAILED');
+        }
+      }
+    } else {
+      fs.symlinkSync(target, link, 'file');
+    }
+  }
+}
+
 function areFilesIdentical(file1, file2) {
   try {
     if (!fs.existsSync(file1) || !fs.existsSync(file2)) return false;
@@ -963,7 +988,7 @@ function getContextStats(activePlugins, activeSkills, activeWorkflows, workspace
 }
 
 
-// Generic toggle action (Enables or disables resource by moving file/folder)
+// Generic toggle action (Enables or disables resource by symlink/junction/copy)
 async function toggleItem(activePath, storagePath, itemId, enable, lang, category) {
   const activeItemPath = path.join(activePath, itemId);
   let storageItemPath = path.join(storagePath, itemId);
@@ -986,25 +1011,71 @@ async function toggleItem(activePath, storagePath, itemId, enable, lang, categor
     fs.mkdirSync(storagePath, { recursive: true });
   }
 
+  const isDir = (category !== 'workflow');
+
   if (enable) {
     if (fs.existsSync(storageItemPath)) {
-      if (fs.existsSync(activeItemPath)) {
+      let existingIsSymlink = false;
+      try {
+        const stats = fs.lstatSync(activeItemPath);
+        existingIsSymlink = stats.isSymbolicLink();
+      } catch (e) {
+        // Doesn't exist
+      }
+
+      if (existingIsSymlink) {
+        fs.unlinkSync(activeItemPath);
+      } else if (fs.existsSync(activeItemPath)) {
         const backupPath = activeItemPath + '_bak_' + Date.now();
         fs.renameSync(activeItemPath, backupPath);
       }
-      safeMoveDir(storageItemPath, activeItemPath);
+
+      try {
+        createLink(storageItemPath, activeItemPath, isDir);
+      } catch (err) {
+        if (err.message === 'CROSS_DRIVE_FILE_LINK_FAILED') {
+          fs.copyFileSync(storageItemPath, activeItemPath);
+          const activeDrive = path.parse(activePath).root;
+          const storageDrive = path.parse(storagePath).root;
+          const warningMsg = getTranslation('workflowLinkWarning', lang)
+            .replace('{activeDrive}', activeDrive.toUpperCase())
+            .replace('{storageDrive}', storageDrive.toUpperCase());
+          vscode.window.showWarningMessage(warningMsg);
+        } else {
+          throw err;
+        }
+      }
     } else {
       if (!fs.existsSync(activeItemPath)) {
         throw new Error(getTranslation('storagePathNotSet', lang));
       }
     }
   } else {
-    if (fs.existsSync(activeItemPath)) {
-      if (fs.existsSync(storageItemPath)) {
-        const backupPath = storageItemPath + '_bak_' + Date.now();
-        fs.renameSync(storageItemPath, backupPath);
+    let exists = false;
+    let isSym = false;
+    try {
+      const stats = fs.lstatSync(activeItemPath);
+      exists = true;
+      isSym = stats.isSymbolicLink();
+    } catch (e) {
+      // Doesn't exist
+    }
+
+    if (exists) {
+      if (isSym) {
+        fs.unlinkSync(activeItemPath);
+      } else {
+        if (isDir) {
+          if (fs.existsSync(storageItemPath)) {
+            const backupPath = storageItemPath + '_bak_' + Date.now();
+            fs.renameSync(storageItemPath, backupPath);
+          }
+          safeMoveDir(activeItemPath, storageItemPath);
+        } else {
+          fs.copyFileSync(activeItemPath, storageItemPath);
+          fs.unlinkSync(activeItemPath);
+        }
       }
-      safeMoveDir(activeItemPath, storageItemPath);
     }
   }
 }
