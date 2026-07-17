@@ -289,6 +289,12 @@ function scanConflicts(activePath, storagePath, category) {
         } else {
           isIdentical = areFilesIdentical(activeItemPath, storageItemPath);
         }
+        
+        // If copies are identical, it is NOT a conflict! (Especially for hard-linked skills/workflows)
+        if (isIdentical) {
+          continue;
+        }
+
         conflicts.push({
           id: name,
           category: category,
@@ -5385,13 +5391,13 @@ function getHtmlContentShared(webview, context, lang) {
               \${c.isIdentical ? '<span style="color: #34d399; font-weight: 500; margin-left: 6px;">(' + (lang === 'ru' ? 'Копии идентичны' : 'Copies are identical') + ')</span>' : ''}
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-              <button class="btn" style="background: var(--success-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'active', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepActive', lang)}</button>
-              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'storage', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepStorage', lang)}</button>
+              <button class="btn" style="background: var(--success-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'active', '\${encodeURIComponent(c.activePath)}', '\${encodeURIComponent(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepActive', lang)}</button>
+              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'storage', '\${encodeURIComponent(c.activePath)}', '\${encodeURIComponent(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepStorage', lang)}</button>
               \${showMerge ? \`
-                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'merge', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnMerge', lang)}</button>
+                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'merge', '\${encodeURIComponent(c.activePath)}', '\${encodeURIComponent(c.storagePath)}', \${c.isDir})">${getTranslation('btnMerge', lang)}</button>
               \` : ''}
               \${showKeepBoth ? \`
-                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'keepBoth', '\${escapeQuotes(c.activePath)}', '\${escapeQuotes(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepBoth', lang)}</button>
+                <button class="btn" style="background: var(--primary-gradient); padding: 4px 8px; font-size: 10px;" onclick="resolveConflict('\${c.id}', '\${c.category}', 'keepBoth', '\${encodeURIComponent(c.activePath)}', '\${encodeURIComponent(c.storagePath)}', \${c.isDir})">${getTranslation('btnKeepBoth', lang)}</button>
               \` : ''}
             </div>
           </div>
@@ -5405,8 +5411,8 @@ function getHtmlContentShared(webview, context, lang) {
         id: id,
         category: category,
         resolution: resolution,
-        activePath: activePath,
-        storagePath: storagePath,
+        activePath: decodeURIComponent(activePath),
+        storagePath: decodeURIComponent(storagePath),
         isDir: isDir
       });
     };
