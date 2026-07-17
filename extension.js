@@ -4694,7 +4694,7 @@ function getHtmlContentShared(webview, context, lang) {
 
     function escapeQuotes(str) {
       if (!str) return '';
-      return str.replace(/\\/g, '\\\\')
+      return str.replace(/\\\\/g, '\\\\\\\\')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;')
                 .replace(new RegExp(String.fromCharCode(96), 'g'), '\\\\' + String.fromCharCode(96));
