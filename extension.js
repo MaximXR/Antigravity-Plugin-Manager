@@ -188,6 +188,15 @@ function scanConflicts(activePath, storagePath, category) {
     const activeItems = fs.readdirSync(activePath);
     for (const name of activeItems) {
       const activeItemPath = path.join(activePath, name);
+      
+      // Ignore if active item is a symlink or directory junction (this means it is enabled and linked)
+      try {
+        const lstat = fs.lstatSync(activeItemPath);
+        if (lstat.isSymbolicLink()) {
+          continue;
+        }
+      } catch (e) {}
+
       const storageItemPath = path.join(storagePath, name);
       let existsInStorage = false;
       try {
@@ -4685,7 +4694,7 @@ function getHtmlContentShared(webview, context, lang) {
 
     function escapeQuotes(str) {
       if (!str) return '';
-      return str.replace(/\\\\/g, '\\\\\\\\')
+      return str.replace(/\\/g, '\\\\')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;')
                 .replace(new RegExp(String.fromCharCode(96), 'g'), '\\\\' + String.fromCharCode(96));
