@@ -103,45 +103,123 @@ function linkDirRecursively(src, dest) {
   }
 }
 
+function removeEmptyDirs(dir) {
+  if (!fs.existsSync(dir)) return;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const subPath = path.join(dir, entry.name);
+        removeEmptyDirs(subPath);
+        try {
+          if (fs.readdirSync(subPath).length === 0) {
+            fs.rmdirSync(subPath);
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
 function syncBackDir(activeDir, storageDir) {
   if (!fs.existsSync(activeDir)) return;
   if (!fs.existsSync(storageDir)) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
-  const entries = fs.readdirSync(activeDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const activePath = path.join(activeDir, entry.name);
-    const storagePath = path.join(storageDir, entry.name);
-    if (entry.isDirectory()) {
-      syncBackDir(activePath, storagePath);
-    } else if (entry.isFile()) {
+
+  let linkedFiles = [];
+  const linkedJsonPath = path.join(activeDir, '.linked_files.json');
+  if (fs.existsSync(linkedJsonPath)) {
+    try {
+      linkedFiles = JSON.parse(fs.readFileSync(linkedJsonPath, 'utf8'));
+    } catch (e) {
+      logDebug(`Error reading .linked_files.json: ${e.message}`);
+    }
+  }
+  const linkedSet = new Set(linkedFiles);
+
+  const activeFiles = getDirFilesRelative(activeDir).filter(f => f.relPath !== '.linked_files.json');
+  const storageFiles = getDirFilesRelative(storageDir);
+
+  const activeMap = new Map(activeFiles.map(f => [f.relPath, f]));
+  const storageMap = new Map(storageFiles.map(f => [f.relPath, f]));
+
+  // 1. Handle Deletions
+  for (const relPath of linkedSet) {
+    const inActive = activeMap.has(relPath);
+    const inStorage = storageMap.has(relPath);
+
+    if (inActive && !inStorage) {
+      // File was deleted from storage (e.g. via git). Delete from active.
+      const fActive = activeMap.get(relPath);
+      if (!fActive.isDirectory) {
+        try {
+          fs.unlinkSync(fActive.fullPath);
+          logDebug(`SyncBack: Deleted ${relPath} from active because it was deleted in storage.`);
+        } catch (e) {}
+        activeMap.delete(relPath);
+      }
+    } else if (!inActive && inStorage) {
+      // File was deleted from active (e.g. by user in editor). Delete from storage.
+      const fStorage = storageMap.get(relPath);
+      if (!fStorage.isDirectory) {
+        try {
+          fs.unlinkSync(fStorage.fullPath);
+          logDebug(`SyncBack: Deleted ${relPath} from storage because it was deleted in active.`);
+        } catch (e) {}
+        storageMap.delete(relPath);
+      }
+    }
+  }
+
+  // 2. Handle Creations
+  for (const [relPath, fActive] of activeMap.entries()) {
+    if (fActive.isDirectory) continue;
+    if (!linkedSet.has(relPath) && !storageMap.has(relPath)) {
+      const destPath = path.join(storageDir, relPath);
+      const destDir = path.dirname(destPath);
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+      try {
+        fs.copyFileSync(fActive.fullPath, destPath);
+        logDebug(`SyncBack: Saved new file ${relPath} from active to storage.`);
+      } catch (e) {
+        logDebug(`SyncBack: Failed to copy new file ${relPath} to storage: ${e.message}`);
+      }
+    }
+  }
+
+  // 3. Handle Modifications (in case editor broke the hard link)
+  for (const [relPath, fActive] of activeMap.entries()) {
+    if (fActive.isDirectory) continue;
+    if (storageMap.has(relPath)) {
+      const fStorage = storageMap.get(relPath);
       let isHardLinked = false;
       try {
-        if (fs.existsSync(storagePath)) {
-          const statActive = fs.statSync(activePath);
-          const statStorage = fs.statSync(storagePath);
-          isHardLinked = (statActive.ino === statStorage.ino && statActive.dev === statStorage.dev);
-        }
+        const statActive = fs.statSync(fActive.fullPath);
+        const statStorage = fs.statSync(fStorage.fullPath);
+        isHardLinked = (statActive.ino === statStorage.ino && statActive.dev === statStorage.dev);
       } catch (e) {}
 
       if (!isHardLinked) {
         try {
-          if (fs.existsSync(storagePath)) {
-            const statActive = fs.statSync(activePath);
-            const statStorage = fs.statSync(storagePath);
-            if (statActive.mtimeMs > statStorage.mtimeMs) {
-              fs.unlinkSync(storagePath);
-              fs.copyFileSync(activePath, storagePath);
-            }
-          } else {
-            fs.copyFileSync(activePath, storagePath);
+          const statActive = fs.statSync(fActive.fullPath);
+          const statStorage = fs.statSync(fStorage.fullPath);
+          if (statActive.mtimeMs > statStorage.mtimeMs) {
+            fs.unlinkSync(fStorage.fullPath);
+            fs.copyFileSync(fActive.fullPath, fStorage.fullPath);
+            logDebug(`SyncBack: Overwrote out-of-sync storage file ${relPath} with active copy.`);
           }
         } catch (e) {
-          logDebug(`Error syncing back file ${entry.name}: ${e.message}`);
+          logDebug(`SyncBack: Failed to sync file ${relPath}: ${e.message}`);
         }
       }
     }
   }
+
+  // 4. Remove empty directories in storage
+  removeEmptyDirs(storageDir);
 }
 
 function createLink(target, link, isDirectory, category) {
@@ -149,6 +227,14 @@ function createLink(target, link, isDirectory, category) {
   if (isDirectory) {
     if (category === 'skill') {
       linkDirRecursively(target, link);
+      try {
+        const files = getDirFilesRelative(link)
+          .filter(f => !f.isDirectory && f.relPath !== '.linked_files.json')
+          .map(f => f.relPath);
+        fs.writeFileSync(path.join(link, '.linked_files.json'), JSON.stringify(files, null, 2), 'utf8');
+      } catch (e) {
+        logDebug(`Error writing .linked_files.json: ${e.message}`);
+      }
     } else {
       if (isWin) {
         fs.symlinkSync(target, link, 'junction');
