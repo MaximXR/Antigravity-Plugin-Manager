@@ -1,5 +1,15 @@
 # История изменений / Changelog
 
+## 1.0.5
+
+### Русский
+* Изменен механизм включения/выключения плагинов, скилов и воркфлоу с физического перемещения файлов на использование символических ссылок и Directory Junctions. Это решает проблемы версионирования и конфликтов в Git.
+* Добавлено предупреждение для Windows-пользователей при невозможности создать ссылку для файлов воркфлоу (рекомендация включить Режим разработчика или перенести хранилище на один диск).
+
+### English
+* Changed the toggle mechanism for plugins, skills, and workflows from physical file movement to symbolic links and Directory Junctions, resolving version control issues and conflicts in Git.
+* Added a warning for Windows users when a link cannot be created for workflow files (recommendation to enable Developer Mode or move the storage to the same drive).
+
 ## 1.0.4
 
 ### Русский
