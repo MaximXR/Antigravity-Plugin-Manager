@@ -1101,6 +1101,15 @@ input:checked + .slider:before {
   to { transform: rotate(360deg); }
 }
 
+.refresh-spin-icon {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.refresh-spin-icon.rotating {
+  animation: spin 0.7s linear infinite;
+}
+
 /* Plugin detail view styling */
 .detail-header {
   display: flex;

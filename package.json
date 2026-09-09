@@ -33,7 +33,8 @@
       {
         "command": "antigravity-plugin-manager.refresh",
         "title": "%command.refresh%",
-        "category": "Antigravity"
+        "category": "Antigravity",
+        "icon": "$(refresh)"
       },
       {
         "command": "antigravity-plugin-manager.selectStorage",
@@ -41,6 +42,15 @@
         "category": "Antigravity"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "antigravity-plugin-manager.refresh",
+          "when": "view == antigravity-plugin-manager.view",
+          "group": "navigation"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

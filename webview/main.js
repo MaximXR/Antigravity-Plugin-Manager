@@ -88,9 +88,12 @@ window.addEventListener('message', event => {
         console.error('Error rendering webview:', renderErr);
       } finally {
         document.body.classList.remove('loading');
+        document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
       }
       break;
     case 'error':
+      document.body.classList.remove('loading');
+      document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
       // Re-enable checkboxes and hide loader on error
       document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = false);
       document.querySelectorAll('[id^="loader-"]').forEach(el => el.style.display = 'none');
@@ -112,6 +115,17 @@ window.addEventListener('message', event => {
   }
 });
 
+// Refresh / Re-parse triggering
+window.triggerRefresh = function(btn) {
+  document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.add('rotating'));
+  document.body.classList.add('loading');
+  vscode.postMessage({ command: 'refresh' });
+  setTimeout(() => {
+    document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
+    document.body.classList.remove('loading');
+  }, 1200);
+};
+
 // Event Listeners
 document.getElementById('btn-select-storage')?.addEventListener('click', () => {
   vscode.postMessage({ command: 'selectStorage' });
@@ -125,8 +139,12 @@ document.getElementById('btn-open-storage')?.addEventListener('click', () => {
   vscode.postMessage({ command: 'openStorage' });
 });
 
-document.getElementById('btn-refresh')?.addEventListener('click', () => {
-  vscode.postMessage({ command: 'refresh' });
+document.getElementById('btn-refresh')?.addEventListener('click', (e) => {
+  window.triggerRefresh(e.currentTarget);
+});
+
+document.getElementById('btn-detail-refresh')?.addEventListener('click', (e) => {
+  window.triggerRefresh(e.currentTarget);
 });
 
 searchInput?.addEventListener('input', () => {

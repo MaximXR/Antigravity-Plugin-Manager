@@ -3,6 +3,10 @@
 ## 1.0.8
 
 ### Русский
+* **Кнопка «Обновить / Перепарсить» (Refresh):**
+  - Добавлена в заголовок панели VS Code (sidebar view title icon) для быстрого обновления списка в один клик.
+  - Добавлена на тулбар основного окна и в шапку деталей плагина (.detail-header) со стильной плавной анимацией вращения иконки (`.refresh-spin-icon.rotating`).
+  - При нажатии мгновенно пересканирует все каталоги (плагины, навыки, сценарии, правила, MCP серверы, хуки и конфликты) без необходимости перезагружать окно IDE (`Developer: Reload Window`).
 * **Кнопка «Открыть папку» в деталях плагина:** перенесена в постоянную верхнюю шапку (.detail-header), рядом с тумблером включения. Теперь кнопка видна всегда, даже если у плагина нет собственных навыков.
 * **Отображение всех ресурсов плагина:**
   - Навыки (Skills)
@@ -11,9 +15,13 @@
   - MCP Серверы (MCP) — исправлен баг отображения внутри плагина, добавлена кнопка открытия папки конфига
   - Хуки (Hooks)
 * **Адаптивная заглушка:** при отсутствии вложенных компонентов отображается аккуратное уведомление `noPluginResources`.
-* **Исправление версионирования SemVer:** строгое соблюдение спецификации VS Code/Antigravity для пакетов расширений.
+* **Исправление версионирования SemVer:** строгое соблюдение спецификации VS Code/Antigravity для пакетов расширений (3 сегмента X.Y.Z).
 
 ### English
+* **"Refresh / Re-parse" Button:**
+  - Added to the sidebar view title bar as a native VS Code header icon for 1-click refresh.
+  - Added to the main view toolbar and plugin details header (.detail-header) with a smooth spinning animation (`.refresh-spin-icon.rotating`).
+  - Triggers instant full re-scanning of plugins, skills, workflows, rules, MCP servers, hooks, and conflicts without needing `Developer: Reload Window`.
 * **"Open Folder" in Plugin Details:** Relocated to the persistent top sticky header (.detail-header) alongside the toggle switch. Now visible regardless of whether the plugin contains skills.
 * **Complete Component Visibility in Plugin Details:**
   - Skills
@@ -22,7 +30,7 @@
   - MCP Servers — fixed visibility bug inside plugin view, added "Open Folder" action
   - Hooks
 * **Clean Empty State:** Added `noPluginResources` banner when a plugin contains no sub-components.
-* **SemVer Compliance:** Strict adherence to 3-segment VS Code/Antigravity extension manifest specifications.
+* **SemVer Compliance:** Strict adherence to 3-segment VS Code/Antigravity extension manifest specifications (X.Y.Z).
 
 ## 1.0.7
 
