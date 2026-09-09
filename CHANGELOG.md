@@ -1,5 +1,29 @@
 # История изменений / Changelog
 
+## 1.0.8
+
+### Русский
+* **Кнопка «Открыть папку» в деталях плагина:** перенесена в постоянную верхнюю шапку (.detail-header), рядом с тумблером включения. Теперь кнопка видна всегда, даже если у плагина нет собственных навыков.
+* **Отображение всех ресурсов плагина:**
+  - Навыки (Skills)
+  - Правила (Rules) с индикаторами активности
+  - Воркфлоу (Workflows) — добавлен блок сценариев с командами `/{name}`
+  - MCP Серверы (MCP) — исправлен баг отображения внутри плагина, добавлена кнопка открытия папки конфига
+  - Хуки (Hooks)
+* **Адаптивная заглушка:** при отсутствии вложенных компонентов отображается аккуратное уведомление `noPluginResources`.
+* **Исправление версионирования SemVer:** строгое соблюдение спецификации VS Code/Antigravity для пакетов расширений.
+
+### English
+* **"Open Folder" in Plugin Details:** Relocated to the persistent top sticky header (.detail-header) alongside the toggle switch. Now visible regardless of whether the plugin contains skills.
+* **Complete Component Visibility in Plugin Details:**
+  - Skills
+  - Rules with glowing active/disabled status dots
+  - Workflows — added dedicated section with `/{name}` slash commands
+  - MCP Servers — fixed visibility bug inside plugin view, added "Open Folder" action
+  - Hooks
+* **Clean Empty State:** Added `noPluginResources` banner when a plugin contains no sub-components.
+* **SemVer Compliance:** Strict adherence to 3-segment VS Code/Antigravity extension manifest specifications.
+
 ## 1.0.7
 
 ### Русский
