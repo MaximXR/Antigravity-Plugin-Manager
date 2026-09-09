@@ -1,5 +1,52 @@
 # История изменений / Changelog
 
+## 1.0.7
+
+### Русский
+* Новый механизм включения/выключения плагинов (Plugin Toggle Engine): физическое перемещение папки в активную директорию при включении и создание Junction в папке хранилища для сохранения структуры проекта. При выключении папка возвращается в хранилище, а Junction удаляется (решает проблему с игнорированием символических ссылок сканерами Antigravity IDE).
+* Добавлены разделы управления для Правил (Rules), MCP Серверов (MCP) и Хуков (Hooks):
+  - Правила: поддержка категорий Global, Workspace и Plugin. Защита системных глобальных правил `GEMINI.md` и `AGENTS.md` от удаления и перемещения.
+  - MCP Серверы: сканирование и отображение серверов из файлов `mcp_config.json` по всем уровням.
+  - Хуки: сканирование `hooks.json` (Global, Workspace, Plugin), поддержка прямого переключения активности (`enabled: true/false`).
+* Добавлена поддержка системных встроенных компонентов Antigravity IDE (`~/.gemini/antigravity-ide/builtin`):
+  - Сканирование и отображение встроенных навыков, сценариев, правил и конфигураций MCP.
+  - Защита встроенных компонентов от модификации (строго Read-Only, блокировка тумблеров, удаления и перемещения) с возможностью быстрого просмотра исходных файлов.
+  - Визуальное выделение встроенных ресурсов стильным бирюзовым бейджем «Встроенный» (`res-builtin`).
+* Новый пульт управления контекстом ИИ — вкладка «Активное» (Active Context Dashboard):
+  - Компактная верхняя плашка включенных плагинов с быстрым отключением в один клик.
+  - Сворачиваемые блоки «Действующие правила», «Действующие навыки», «Действующие воркфлоу», «Действующие MCP серверы» и «Действующие хуки».
+* Четкие цветовые индикаторы статуса (Status Dots):
+  - Зеленая светящаяся точка для всех реально активных компонентов в контексте ИИ.
+  - Красная светящаяся точка для отключенных ресурсов (отключенных глобально, тумблером или через отключенный родительский плагин).
+* Улучшенная работа со связанными ресурсами плагинов:
+  - Полная видимость всех навыков и воркфлоу из плагинов с явным статусом активности.
+  - Кнопка прямого перехода «Управление плагином» с сохранением навигации.
+  - Разблокировано перемещение вложенных ресурсов плагинов между плагинами, глобальным хранилищем и проектами.
+* Настраиваемый режим группировки: переключатель «Группировка: Вкл/Выкл» на верхней панели (по умолчанию выключен для компактного отображения без лишнего скролла).
+* Полный модульный рефакторинг архитектуры:
+  - Компактный оркестратор `extension.js` сокращен более чем в 5 раз (с 3165 до ~570 строк).
+  - Выделен сервисный слой `services/` (`fsUtils.js` для файловой системы и связей, `scanners.js` для поиска компонентов, `actions.js` для мутаций и проверок).
+  - Веб-интерфейс полностью изолирован в каталоге `webview/` (`index.html`, `style.css`, `main.js`).
+  - Добавлена архитектурная карта проекта `AGENTS.md`.
+
+### English
+* New Active AI Context Dashboard:
+  - Compact header bar for active plugins with 1-click quick disable chips.
+  - Collapsible categories: Active Rules, Active Skills, Active Workflows, Active MCP Servers, and Active Hooks.
+* High-contrast status indicators (Status Dots):
+  - Glowing green indicator for all active components loaded in AI context.
+  - Glowing red indicator for disabled resources (disabled in storage, toggled off, or belonging to disabled plugins).
+* Enhanced plugin resource handling:
+  - Full visibility of all plugin skills, workflows, rules, and MCP servers with explicit status indicators.
+  - Quick 1-click "Manage Plugin" shortcut with navigation memory.
+  - Unlocked cross-scope moving for plugin resources between plugins, global storage, and workspaces.
+* Flexible grouping mode: toolbar toggle "Grouping: On/Off" (off by default for compact, continuous scrolling).
+* Comprehensive modular architecture refactoring:
+  - Reduced `extension.js` from 3165 lines to ~570 lines as a clean IPC orchestrator.
+  - Modularized backend service layer in `services/` (`fsUtils.js`, `scanners.js`, `actions.js`).
+  - Isolated frontend assets in `webview/` (`index.html`, `style.css`, `main.js`).
+  - Added architectural guide `AGENTS.md`.
+
 ## 1.0.5
 
 ### Русский

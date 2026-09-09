@@ -9,3 +9,4 @@ plugin_manager_debug.log
 *.env*
 .env.ovsx
 temp_resources/**
+drafts/**
