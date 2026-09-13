@@ -9,4 +9,5 @@ desktop.ini
 temp_resources/
 *.env*
 .env.ovsx
+.agents/
 drafts/

@@ -1,5 +1,17 @@
 const vscode = acquireVsCodeApi();
 
+// Global Webview Client Error Logger
+window.onerror = function(message, source, lineno, colno, error) {
+  try {
+    vscode.postMessage({
+      command: 'clientError',
+      error: String(message) + (error && error.stack ? '\n' + error.stack : ''),
+      source: source,
+      lineno: lineno
+    });
+  } catch (e) {}
+};
+
 function t(key, defaultVal) {
   if (window.I18N && window.I18N[key] !== undefined) {
     return window.I18N[key];
@@ -7,7 +19,7 @@ function t(key, defaultVal) {
   return defaultVal !== undefined ? defaultVal : key;
 }
 
-window.copyText = function(btn, text) {
+function copyText(btn, text) {
   navigator.clipboard.writeText(text).then(() => {
     const originalHtml = btn.innerHTML;
     btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -17,7 +29,8 @@ window.copyText = function(btn, text) {
   }).catch(err => {
     console.error('Failed to copy text: ', err);
   });
-};
+}
+window.copyText = copyText;
 
 // Lists data
 let pluginsData = [];
@@ -27,11 +40,102 @@ let rulesData = [];
 let mcpData = [];
 let hooksData = [];
 let workspaceFoldersList = [];
+let selectedWorkspaceRoot = null;
 let conflictsList = [];
+let connectedFoldersList = [];
+let updatesData = null;
+let targetUpdatePlugin = null;
 
 let currentTab = 'active';
 let activePluginId = null;
 let hasScrolledToTabs = false;
+let isDetailedView = false;
+let isSingleColumn = false;
+let isGroupingEnabled = false;
+let isDetailDetailedView = false;
+let isDetailSingleColumn = false;
+let previousTabBeforePluginDetails = null;
+
+let isConfigReposCollapsed = window.isConfigReposCollapsed || false;
+function toggleConfigReposSection() {
+  isConfigReposCollapsed = !isConfigReposCollapsed;
+  window.isConfigReposCollapsed = isConfigReposCollapsed;
+  const body = document.getElementById('config-repos-body');
+  const chevron = document.getElementById('config-repos-chevron');
+  if (body) body.classList.toggle('collapsed', isConfigReposCollapsed);
+  if (chevron) chevron.classList.toggle('collapsed', isConfigReposCollapsed);
+}
+window.toggleConfigReposSection = toggleConfigReposSection;
+
+function getActiveWorkspaceRoot() {
+  if (selectedWorkspaceRoot && workspaceFoldersList.some(w => w.fsPath === selectedWorkspaceRoot)) {
+    return selectedWorkspaceRoot;
+  }
+  if (workspaceFoldersList && workspaceFoldersList.length > 0) {
+    selectedWorkspaceRoot = workspaceFoldersList[0].fsPath;
+    return selectedWorkspaceRoot;
+  }
+  return null;
+}
+
+function renderWorkspaceSelector() {
+  const blockEl = document.getElementById('workspace-scope-block');
+  const titleLabelEl = document.getElementById('workspace-scope-title-label');
+  const selectEl = document.getElementById('workspace-selector-select');
+  const helpEl = document.getElementById('workspace-scope-help');
+  const hintEl = document.getElementById('workspace-multi-hint');
+  if (!blockEl) return;
+
+  if (!workspaceFoldersList || workspaceFoldersList.length === 0) {
+    blockEl.style.display = 'none';
+    selectedWorkspaceRoot = null;
+    return;
+  }
+
+  blockEl.style.display = 'flex';
+  getActiveWorkspaceRoot();
+
+  if (workspaceFoldersList.length === 1) {
+    const singleWs = workspaceFoldersList[0];
+    selectedWorkspaceRoot = singleWs.fsPath;
+    if (titleLabelEl) {
+      titleLabelEl.textContent = `${t('storageScopeWorkspace', 'Рабочая область')}: ${singleWs.name}`;
+    }
+    if (selectEl) selectEl.style.display = 'none';
+    if (helpEl) helpEl.style.display = 'none';
+    if (hintEl) hintEl.style.display = 'none';
+    return;
+  }
+
+  // Multi-root workspace
+  if (titleLabelEl) {
+    titleLabelEl.textContent = `${t('storageScopeWorkspace', 'Рабочая область')}:`;
+  }
+  if (helpEl) {
+    helpEl.style.display = 'inline-block';
+    helpEl.title = t('workspaceMultiRootTooltip', 'В мульти-проектах Antigravity IDE по умолчанию считывает контекст из первой (верхней) основной папки.');
+  }
+  if (hintEl) {
+    hintEl.style.display = 'block';
+    hintEl.textContent = `💡 ${t('workspaceSelectorHint', 'Antigravity IDE по умолчанию использует первую (верхнюю) папку как основную. Настройки будут применены к выбранному проекту.')}`;
+  }
+
+  if (selectEl) {
+    selectEl.style.display = 'inline-block';
+    selectEl.innerHTML = workspaceFoldersList.map((w, idx) => {
+      const isSelected = w.fsPath === selectedWorkspaceRoot ? 'selected' : '';
+      const isPrimary = idx === 0;
+      const primaryTag = isPrimary ? ` [${t('workspacePrimaryTag', 'Основной')}]` : '';
+      return `<option value="${escapeQuotes(w.fsPath)}" ${isSelected}>${escapeHtml(w.name)}${primaryTag}</option>`;
+    }).join('');
+
+    selectEl.onchange = (e) => {
+      selectedWorkspaceRoot = e.target.value;
+      renderConnectedFolders();
+      renderCurrentTab();
+    };
+  }
+}
 
 // DOM Elements
 const storagePathDisplay = document.getElementById('storage-path-display');
@@ -48,21 +152,226 @@ const listSectionTitle = document.getElementById('list-section-title');
 // Init
 vscode.postMessage({ command: 'ready' });
 
+function normalizePathStr(p) {
+  return (p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function renderConnectedFolders() {
+  const globalContainer = document.getElementById('connected-repos-global-container');
+  const globalChipsEl = document.getElementById('connected-repos-global-chips');
+  const wsContainer = document.getElementById('connected-repos-workspace-container');
+  const wsChipsEl = document.getElementById('connected-repos-workspace-chips');
+
+  const globalList = (connectedFoldersList || []).filter(cf => cf.scope === 'global');
+  const wsRoot = getActiveWorkspaceRoot();
+  const wsList = (connectedFoldersList || []).filter(cf => {
+    if (cf.scope !== 'workspace') return false;
+    if (!wsRoot) return true;
+    return !cf.workspaceRoot || normalizePathStr(cf.workspaceRoot) === normalizePathStr(wsRoot);
+  });
+
+  const renderChipsHtml = (list) => {
+    return list.map(cf => {
+      const isPlugin = cf.type === 'plugin' || cf.type === 'plugins';
+      const isGlobal = cf.scope === 'global';
+      const badgeClass = isGlobal ? 'badge-global' : 'badge-workspace';
+      const scopeLabel = isGlobal ? '🌐 Global' : `📁 ${escapeHtml(cf.workspaceName || 'Project')}`;
+      const typeIcon = isPlugin ? '🔌' : '⚡';
+      const typeLabel = isPlugin ? t('tabPlugins', 'Plugins') : t('tabSkills', 'Skills');
+      const folderPath = cf.path || cf.physicalPath || cf.configuredPath || '';
+      const folderName = cf.folderName || cf.label || (folderPath ? folderPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() : '');
+      const chipTooltip = `${t('clickToOpenFolder', 'Click to open folder in File Explorer')}: ${folderPath} (${scopeLabel} • ${typeLabel})`;
+
+      return `
+        <div class="repo-chip" title="${escapeHtml(chipTooltip)}" onclick="openConnectedFolder('${escapeQuotes(folderPath)}')">
+          <span class="repo-chip-badge ${badgeClass}">${scopeLabel}</span>
+          <span class="repo-chip-icon">${typeIcon}</span>
+          <span class="repo-chip-name">${escapeHtml(folderName)}</span>
+          <span class="repo-chip-path">${escapeHtml(folderPath)}</span>
+          <button class="repo-chip-disconnect" title="${t('disconnect', 'Disconnect')}" onclick="event.stopPropagation(); disconnectFolder('${escapeQuotes(cf.sourceFile || '')}', '${escapeQuotes(cf.configuredPath || folderPath)}')">×</button>
+        </div>
+      `;
+    }).join('');
+  };
+
+  if (globalContainer && globalChipsEl) {
+    if (globalList.length === 0) {
+      globalContainer.style.display = 'none';
+      globalChipsEl.innerHTML = '';
+    } else {
+      globalContainer.style.display = 'block';
+      globalChipsEl.innerHTML = renderChipsHtml(globalList);
+    }
+  }
+
+  if (wsContainer && wsChipsEl) {
+    if (wsList.length === 0) {
+      wsContainer.style.display = 'none';
+      wsChipsEl.innerHTML = '';
+    } else {
+      wsContainer.style.display = 'block';
+      wsChipsEl.innerHTML = renderChipsHtml(wsList);
+    }
+  }
+
+  // Fallback for legacy single container if present
+  const fallbackContainer = document.getElementById('connected-repos-container');
+  const fallbackChipsEl = document.getElementById('connected-repos-chips');
+  if (fallbackContainer && fallbackChipsEl) {
+    if (!connectedFoldersList || connectedFoldersList.length === 0) {
+      fallbackContainer.style.display = 'none';
+      fallbackChipsEl.innerHTML = '';
+    } else {
+      fallbackContainer.style.display = 'block';
+      fallbackChipsEl.innerHTML = renderChipsHtml(connectedFoldersList);
+    }
+  }
+}
+
+let syncCountdownInterval = null;
+let syncRemainingMs = 0;
+let syncHideTimeout = null;
+let currentSyncSkillsCount = 0;
+
+function pluralSkills(n, lang = 'ru') {
+  if (lang !== 'ru') return n === 1 ? '1 skill' : `${n} skills`;
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 19) return `${n} навыков`;
+  if (mod10 === 1) return `${n} навык`;
+  if (mod10 >= 2 && mod10 <= 4) return `${n} навыка`;
+  return `${n} навыков`;
+}
+
+function formatSyncTime(ms, skillsCount = 0) {
+  const totalSec = Math.max(1, Math.round(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  let timeStr = min > 0 ? `${min}м ${sec < 10 ? '0' : ''}${sec}с` : `${sec}с`;
+  if (skillsCount > 1) {
+    const plural = pluralSkills(skillsCount, window.LANG || 'ru');
+    return `IDE: ~${timeStr} (${plural})`;
+  }
+  return `IDE: ~${timeStr}`;
+}
+
+function calculatePluginSyncEta(pluginId, enable) {
+  if (!enable) return 2500;
+  const plugin = pluginsData.find(p => p.id === pluginId || p.name === pluginId);
+  const count = (plugin && plugin.skillsCount) ? plugin.skillsCount : ((plugin && plugin.skills) ? plugin.skills.length : 1);
+  return Math.max(3000, Math.round(2000 + count * 3000));
+}
+
+function setSyncingState(etaMs = 2500, skillsCount = 0) {
+  const badge = document.getElementById('sync-status-badge');
+  const text = document.getElementById('sync-status-text');
+  const strip = document.getElementById('sync-status-strip');
+  if (!badge || !text) return;
+
+  if (syncHideTimeout) {
+    clearTimeout(syncHideTimeout);
+    syncHideTimeout = null;
+  }
+
+  if (strip) strip.style.display = 'flex';
+  badge.className = 'sync-status-badge syncing';
+  badge.style.display = 'inline-flex';
+  badge.style.opacity = '1';
+  
+  if (skillsCount > 0) {
+    currentSyncSkillsCount = skillsCount;
+  }
+  syncRemainingMs = Math.max(syncRemainingMs, etaMs);
+
+  const softApplyBtn = document.getElementById('btn-sync-soft-apply');
+  if (softApplyBtn) {
+    if (syncRemainingMs > 4000 || currentSyncSkillsCount > 1) {
+      softApplyBtn.style.display = 'inline-flex';
+    } else {
+      softApplyBtn.style.display = 'none';
+    }
+  }
+
+  const updateText = () => {
+    text.textContent = formatSyncTime(syncRemainingMs, currentSyncSkillsCount);
+  };
+
+  updateText();
+
+  if (syncCountdownInterval) clearInterval(syncCountdownInterval);
+  syncCountdownInterval = setInterval(() => {
+    syncRemainingMs -= 1000;
+    if (syncRemainingMs <= 0) {
+      clearInterval(syncCountdownInterval);
+      syncCountdownInterval = null;
+      text.textContent = t('syncFinalizing', 'IDE: синхр...');
+      if (softApplyBtn) softApplyBtn.style.display = 'none';
+    } else {
+      updateText();
+    }
+  }, 1000);
+}
+
+function handleSyncStatus(msg) {
+  const badge = document.getElementById('sync-status-badge');
+  const text = document.getElementById('sync-status-text');
+  const strip = document.getElementById('sync-status-strip');
+  const softApplyBtn = document.getElementById('btn-sync-soft-apply');
+  if (!badge || !text) return;
+
+  if (msg.state === 'syncing') {
+    setSyncingState(msg.etaMs || 2500, msg.skillsCount || currentSyncSkillsCount);
+  } else if (msg.state === 'synced') {
+    if (syncCountdownInterval) {
+      clearInterval(syncCountdownInterval);
+      syncCountdownInterval = null;
+    }
+    if (softApplyBtn) softApplyBtn.style.display = 'none';
+    if (strip) strip.style.display = 'flex';
+    badge.className = 'sync-status-badge synced';
+    badge.style.display = 'inline-flex';
+    badge.style.opacity = '1';
+    text.textContent = t('syncComplete', '✓ IDE синхронизирована');
+    currentSyncSkillsCount = 0;
+    syncRemainingMs = 0;
+
+    if (syncHideTimeout) clearTimeout(syncHideTimeout);
+    syncHideTimeout = setTimeout(() => {
+      badge.style.opacity = '0';
+      setTimeout(() => {
+        if (badge && badge.className.includes('synced')) {
+          badge.style.display = 'none';
+          badge.style.opacity = '1';
+          if (strip) strip.style.display = 'none';
+        }
+      }, 350);
+    }, 3000);
+  }
+}
+window.setSyncingState = setSyncingState;
+window.handleSyncStatus = handleSyncStatus;
+window.calculatePluginSyncEta = calculatePluginSyncEta;
+
 // Listen to messages from extension
 window.addEventListener('message', event => {
   const message = event.data;
   switch (message.command) {
+    case 'syncStatus':
+      handleSyncStatus(message);
+      break;
     case 'init':
-      storagePathDisplay.textContent = message.storagePath;
-      storagePathDisplay.title = message.storagePath;
+      if (storagePathDisplay) {
+        storagePathDisplay.textContent = message.storagePath || '';
+        storagePathDisplay.title = message.storagePath || '';
+      }
       
       // Set stats
-      valPlugins.textContent = message.stats.activePlugins + '/' + message.stats.totalPlugins;
-      valSkills.textContent = message.stats.skills;
-      valRules.textContent = message.stats.rules;
-      valWorkflows.textContent = message.stats.workflows;
-      if (valMcp) valMcp.textContent = message.stats.mcp !== undefined ? message.stats.mcp : 0;
-      if (valHooks) valHooks.textContent = message.stats.hooks !== undefined ? message.stats.hooks : 0;
+      if (valPlugins && message.stats) valPlugins.textContent = message.stats.activePlugins + '/' + message.stats.totalPlugins;
+      if (valSkills && message.stats) valSkills.textContent = message.stats.skills;
+      if (valRules && message.stats) valRules.textContent = message.stats.rules;
+      if (valWorkflows && message.stats) valWorkflows.textContent = message.stats.workflows;
+      if (valMcp && message.stats) valMcp.textContent = message.stats.mcp !== undefined ? message.stats.mcp : 0;
+      if (valHooks && message.stats) valHooks.textContent = message.stats.hooks !== undefined ? message.stats.hooks : 0;
 
       pluginsData = message.plugins || [];
       skillsData = message.skills || [];
@@ -72,17 +381,25 @@ window.addEventListener('message', event => {
       hooksData = message.hooks || [];
       workspaceFoldersList = message.workspaceFolders || [];
       conflictsList = message.conflicts || [];
+      connectedFoldersList = message.connectedFolders || [];
+      if (message.liveContext) {
+        window.currentLiveContext = message.liveContext;
+      }
+      if (message.updatesState) {
+        updatesData = message.updatesState;
+        updateToolbarBadge();
+      }
+      clearAllItemLoaders();
       
       try {
-        renderConflicts();
-        renderCurrentTab();
+        try { renderConnectedFolders(); } catch (e) { console.error('renderConnectedFolders error:', e); }
+        try { renderWorkspaceSelector(); } catch (e) { console.error('renderWorkspaceSelector error:', e); }
+        try { renderConflicts(); } catch (e) { console.error('renderConflicts error:', e); }
+        try { renderCurrentTab(); } catch (e) { console.error('renderCurrentTab error:', e); }
         
         if (!hasScrolledToTabs) {
           hasScrolledToTabs = true;
-          const statsBlock = document.getElementById('stats-block');
-          if (statsBlock) {
-            statsBlock.scrollIntoView({ block: 'start' });
-          }
+          scrollToStickyNav();
         }
       } catch (renderErr) {
         console.error('Error rendering webview:', renderErr);
@@ -91,13 +408,56 @@ window.addEventListener('message', event => {
         document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
       }
       break;
+    case 'updatesChecked':
+      document.querySelectorAll('.update-icon').forEach(icon => icon.classList.remove('rotating'));
+      const chkBtnText = document.getElementById('btn-check-updates-text');
+      if (chkBtnText) chkBtnText.textContent = t('checkUpdates', 'Check Updates');
+      if (message.updatesState) {
+        updatesData = message.updatesState;
+        updateToolbarBadge();
+        try { renderCurrentTab(); } catch (e) {}
+        if (activePluginId) {
+          try { renderPluginDetailsView(); } catch (e) {}
+        }
+      }
+      break;
+    case 'updateProgress':
+      appendUpdateLog(message.message);
+      break;
+    case 'pluginUpdated':
+      appendUpdateLog('✓ ' + (message.message || 'Updated successfully!'));
+      if (message.updatesState) {
+        updatesData = message.updatesState;
+        updateToolbarBadge();
+      }
+      const btnConfirmEl = document.getElementById('btn-confirm-update');
+      if (btnConfirmEl) {
+        btnConfirmEl.textContent = '✓ ' + (window.LANG === 'ru' ? 'Обновлено' : 'Updated');
+        btnConfirmEl.style.background = '#059669';
+        btnConfirmEl.disabled = true;
+      }
+      setTimeout(() => {
+        closePluginUpdateModal();
+      }, 1400);
+      break;
+    case 'updateFailed':
+      appendUpdateLog('❌ ' + (message.error || 'Update failed'));
+      const btnConfErr = document.getElementById('btn-confirm-update');
+      if (btnConfErr) {
+        btnConfErr.textContent = t('updateNow', 'Update');
+        btnConfErr.disabled = false;
+      }
+      const btnCancelErr = document.getElementById('btn-cancel-update');
+      if (btnCancelErr) btnCancelErr.disabled = false;
+      break;
+    case 'liveContextData':
+      window.currentLiveContext = message.data;
+      renderLiveContextModal();
+      break;
     case 'error':
       document.body.classList.remove('loading');
       document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
-      // Re-enable checkboxes and hide loader on error
-      document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = false);
-      document.querySelectorAll('[id^="loader-"]').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('[id^="switch-container-"]').forEach(el => el.style.display = 'block');
+      clearAllItemLoaders();
       
       const dLoader = document.getElementById('detail-loader');
       const dSwitch = document.getElementById('detail-switch-container');
@@ -116,17 +476,187 @@ window.addEventListener('message', event => {
 });
 
 // Refresh / Re-parse triggering
-window.triggerRefresh = function(btn) {
+function triggerRefresh(btn) {
   document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.add('rotating'));
   document.body.classList.add('loading');
+  setSyncingState(1500);
   vscode.postMessage({ command: 'refresh' });
   setTimeout(() => {
     document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));
     document.body.classList.remove('loading');
   }, 1200);
-};
+}
+window.triggerRefresh = triggerRefresh;
+
+// Soft Apply Language Server restart
+function triggerSoftApply(event) {
+  if (event) event.stopPropagation();
+  if (syncCountdownInterval) {
+    clearInterval(syncCountdownInterval);
+    syncCountdownInterval = null;
+  }
+  if (syncHideTimeout) {
+    clearTimeout(syncHideTimeout);
+    syncHideTimeout = null;
+  }
+  syncRemainingMs = 0;
+  currentSyncSkillsCount = 0;
+  const badge = document.getElementById('sync-status-badge');
+  const text = document.getElementById('sync-status-text');
+  const strip = document.getElementById('sync-status-strip');
+  const btn = document.getElementById('btn-sync-soft-apply');
+  if (strip) strip.style.display = 'flex';
+  if (badge) {
+    badge.className = 'sync-status-badge syncing';
+    badge.style.display = 'inline-flex';
+    badge.style.opacity = '1';
+  }
+  if (text) text.textContent = t('syncFinalizing', 'IDE: синхр...');
+  if (btn) btn.style.display = 'none';
+  vscode.postMessage({ command: 'softApplyIde' });
+}
+window.triggerSoftApply = triggerSoftApply;
+
+// Live Context Modal Handlers
+function openLiveContextModal(event) {
+  if (event) event.stopPropagation();
+  const modal = document.getElementById('live-context-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  if (!window.currentLiveContext) {
+    requestLiveContext();
+  } else {
+    renderLiveContextModal();
+  }
+}
+window.openLiveContextModal = openLiveContextModal;
+
+function closeLiveContextModal() {
+  const modal = document.getElementById('live-context-modal');
+  if (modal) modal.style.display = 'none';
+}
+window.closeLiveContextModal = closeLiveContextModal;
+
+function requestLiveContext() {
+  vscode.postMessage({ command: 'getIdeLiveContext' });
+}
+window.requestLiveContext = requestLiveContext;
+
+function renderLiveContextModal() {
+  const body = document.getElementById('live-context-body');
+  if (!body) return;
+  const ctx = window.currentLiveContext;
+  if (!ctx || !ctx.available) {
+    body.innerHTML = `<div style="text-align:center; padding: 24px; color: var(--text-muted);">${t('liveContextNoData', 'Нет данных о недавних диалогах IDE')}</div>`;
+    return;
+  }
+
+  const dateStr = ctx.updatedAt ? new Date(ctx.updatedAt).toLocaleTimeString() : '—';
+  const activePluginsSet = new Set((ctx.activePlugins || []).map(p => p.toLowerCase()));
+
+  const allPlugins = pluginsData || [];
+  const managerActivePlugins = allPlugins.filter(p => p.isEnabled || p.isGloballyEnabled);
+
+  let pluginsHtml = '';
+  if (managerActivePlugins.length === 0) {
+    pluginsHtml = '<div style="color: var(--text-muted); font-size: 11px;">(Нет активных плагинов)</div>';
+  } else {
+    pluginsHtml = managerActivePlugins.map(p => {
+      const pid = (p.rawId || p.id || '').toLowerCase();
+      const isLive = activePluginsSet.has(pid);
+      const tagClass = isLive ? 'in-context' : 'pending';
+      const statusIcon = isLive ? '✓' : '⏳';
+      const statusText = isLive ? t('liveContextInPrompt', 'В контексте') : t('liveContextPending', 'Индексируется...');
+      return `
+        <div class="live-ctx-tag ${tagClass}">
+          <span>${escapeHtml(p.displayName || p.name)}</span>
+          <span style="opacity: 0.8; font-size: 9.5px;">${statusIcon} ${statusText}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  body.innerHTML = `
+    <div class="live-ctx-card">
+      <div class="live-ctx-header-meta">
+        <span>${t('liveContextActiveConvo', 'Активный диалог:')} <code style="color: #93c5fd;">${escapeHtml(ctx.conversationId ? ctx.conversationId.slice(0, 8) + '...' : '—')}</code></span>
+        <span>${t('liveContextLastUpdated', 'Обновлено:')} <b>${escapeHtml(dateStr)}</b></span>
+      </div>
+      <div style="font-size: 11.5px; color: var(--text-muted);">
+        ${t('liveContextSkillsCount', 'Навыков в промпте:')} <b style="color: #34d399; font-size: 13px;">${ctx.skillsCount || 0}</b>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: #f1f5f9;">
+        ${t('liveContextActivePlugins', 'Плагины в промпте:')}
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        ${pluginsHtml}
+      </div>
+    </div>
+  `;
+}
+window.renderLiveContextModal = renderLiveContextModal;
 
 // Event Listeners
+document.getElementById('btn-open-config-json')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'openConfigJson' });
+});
+
+document.getElementById('btn-open-plugins-json')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'openPluginsJson' });
+});
+
+document.getElementById('btn-open-skills-json')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'openSkillsJson' });
+});
+
+// Project Workspace JSON & Folder buttons
+document.getElementById('btn-open-project-plugins-json')?.addEventListener('click', () => {
+  const wsRoot = getActiveWorkspaceRoot();
+  vscode.postMessage({ command: 'openPluginsJson', workspaceRoot: wsRoot });
+});
+
+document.getElementById('btn-open-project-skills-json')?.addEventListener('click', () => {
+  const wsRoot = getActiveWorkspaceRoot();
+  vscode.postMessage({ command: 'openSkillsJson', workspaceRoot: wsRoot });
+});
+
+document.getElementById('btn-open-project-agents-folder')?.addEventListener('click', () => {
+  const wsRoot = getActiveWorkspaceRoot();
+  vscode.postMessage({ command: 'openAgentsFolder', workspaceRoot: wsRoot });
+});
+
+// Explicit Global Connect buttons
+document.getElementById('btn-connect-plugins-global')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'connectFolder', type: 'plugins', scope: 'global' });
+});
+
+document.getElementById('btn-connect-skills-global')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'connectFolder', type: 'skills', scope: 'global' });
+});
+
+// Explicit Workspace Connect buttons
+document.getElementById('btn-connect-plugins-project')?.addEventListener('click', () => {
+  const wsRoot = getActiveWorkspaceRoot();
+  vscode.postMessage({ command: 'connectFolder', type: 'plugins', scope: 'workspace', workspaceRoot: wsRoot });
+});
+
+document.getElementById('btn-connect-skills-project')?.addEventListener('click', () => {
+  const wsRoot = getActiveWorkspaceRoot();
+  vscode.postMessage({ command: 'connectFolder', type: 'skills', scope: 'workspace', workspaceRoot: wsRoot });
+});
+
+// Fallback legacy connect buttons
+document.getElementById('btn-connect-plugins')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'connectFolder', type: 'plugins' });
+});
+
+document.getElementById('btn-connect-skills')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'connectFolder', type: 'skills' });
+});
+
 document.getElementById('btn-select-storage')?.addEventListener('click', () => {
   vscode.postMessage({ command: 'selectStorage' });
 });
@@ -135,16 +665,27 @@ document.getElementById('btn-open-active')?.addEventListener('click', () => {
   vscode.postMessage({ command: 'openActive' });
 });
 
+document.getElementById('btn-open-skills-folder')?.addEventListener('click', () => {
+  vscode.postMessage({ command: 'openActiveSkills' });
+});
+
+function openConnectedFolder(folderPath) {
+  if (folderPath) {
+    vscode.postMessage({ command: 'openFolder', path: folderPath });
+  }
+}
+window.openConnectedFolder = openConnectedFolder;
+
 document.getElementById('btn-open-storage')?.addEventListener('click', () => {
   vscode.postMessage({ command: 'openStorage' });
 });
 
 document.getElementById('btn-refresh')?.addEventListener('click', (e) => {
-  window.triggerRefresh(e.currentTarget);
+  triggerRefresh(e.currentTarget);
 });
 
 document.getElementById('btn-detail-refresh')?.addEventListener('click', (e) => {
-  window.triggerRefresh(e.currentTarget);
+  triggerRefresh(e.currentTarget);
 });
 
 searchInput?.addEventListener('input', () => {
@@ -155,8 +696,16 @@ document.getElementById('lang-select')?.addEventListener('change', (e) => {
   vscode.postMessage({ command: 'changeLanguage', language: e.target.value });
 });
 
+// Auto-scroll to top of viewport
+function scrollToStickyNav() {
+  if (typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
+window.scrollToStickyNav = scrollToStickyNav;
+
 // Switch Tabs
-window.switchTab = function(tabName) {
+function switchTab(tabName) {
   currentTab = tabName;
   activePluginId = null; // Switching tabs exits plugin detail view
   
@@ -188,19 +737,77 @@ window.switchTab = function(tabName) {
   
   if (searchInput) searchInput.value = '';
   renderCurrentTab();
-};
+  scrollToStickyNav();
+}
+window.switchTab = switchTab;
 
-window.toggleItem = function(category, itemId, enable) {
-  document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = true);
-  
+// Active Item Toggle & Auto-Recovery Engine
+const activeToggleTimers = new Map();
+
+function trackItemLoading(itemId) {
+  if (!itemId) return;
   const switchEl = document.getElementById('switch-container-' + itemId);
   const loaderEl = document.getElementById('loader-' + itemId);
   if (switchEl && loaderEl) {
     switchEl.style.display = 'none';
     loaderEl.style.display = 'block';
   }
-  
-  if (activePluginId && activePluginId === itemId) {
+
+  if (activeToggleTimers.has(itemId)) {
+    clearTimeout(activeToggleTimers.get(itemId));
+  }
+
+  // Auto-recovery timeout: 2500ms
+  // If backend re-render has not arrived within 2.5s, restore the switch!
+  const timer = setTimeout(() => {
+    activeToggleTimers.delete(itemId);
+    if (switchEl && loaderEl) {
+      switchEl.style.display = 'block';
+      loaderEl.style.display = 'none';
+      const cb = switchEl.querySelector('input[type="checkbox"]');
+      if (cb) cb.disabled = false;
+    }
+    const dSwitch = document.getElementById('detail-switch-container');
+    const dLoader = document.getElementById('detail-loader');
+    if (dSwitch && dLoader) {
+      dLoader.style.display = 'none';
+      dSwitch.style.display = 'block';
+    }
+  }, 2500);
+
+  activeToggleTimers.set(itemId, timer);
+}
+window.trackItemLoading = trackItemLoading;
+
+function clearAllItemLoaders() {
+  activeToggleTimers.forEach(timer => clearTimeout(timer));
+  activeToggleTimers.clear();
+  document.querySelectorAll('[id^="loader-"]').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('[id^="switch-container-"]').forEach(el => el.style.display = 'block');
+  document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = false);
+
+  const dLoader = document.getElementById('detail-loader');
+  const dSwitch = document.getElementById('detail-switch-container');
+  if (dLoader && dSwitch) {
+    dLoader.style.display = 'none';
+    dSwitch.style.display = 'block';
+  }
+}
+window.clearAllItemLoaders = clearAllItemLoaders;
+
+function togglePluginGlobal(pluginId, enable, physicalPath = null) {
+  const plugin = pluginsData.find(p => p.id === pluginId || p.name === pluginId || (p.physicalPath && physicalPath && p.physicalPath === physicalPath));
+  const count = (plugin && plugin.skillsCount) ? plugin.skillsCount : ((plugin && plugin.skills) ? plugin.skills.length : 1);
+  const etaMs = calculatePluginSyncEta(pluginId, enable);
+  setSyncingState(etaMs, enable ? count : 0);
+
+  // Non-blocking: only show loader for this specific plugin, never lock other items
+  trackItemLoading(pluginId);
+  if (plugin && plugin.id && plugin.id !== pluginId) {
+    trackItemLoading(plugin.id);
+  }
+
+  if (activePluginId && (activePluginId === pluginId || (plugin && activePluginId === plugin.id))) {
     const dSwitch = document.getElementById('detail-switch-container');
     const dLoader = document.getElementById('detail-loader');
     if (dSwitch && dLoader) {
@@ -208,11 +815,74 @@ window.toggleItem = function(category, itemId, enable) {
       dLoader.style.display = 'block';
     }
   }
-  
-  vscode.postMessage({ command: 'toggle', category: category, id: itemId, enable: enable });
-};
+  vscode.postMessage({ command: 'togglePluginGlobal', id: pluginId, enable: enable, physicalPath: physicalPath, etaMs: etaMs, skillsCount: count });
+}
+window.togglePluginGlobal = togglePluginGlobal;
 
-window.openItemFolder = function(category, itemId, isEnabled, isLocal, physicalPath) {
+function togglePluginProject(workspaceRoot, pluginPath, pluginId, action) {
+  const isEnabling = (action === 'enable' || action === true);
+  const plugin = pluginsData.find(p => p.id === pluginId || p.name === pluginId);
+  const count = (plugin && plugin.skillsCount) ? plugin.skillsCount : ((plugin && plugin.skills) ? plugin.skills.length : 1);
+  const etaMs = calculatePluginSyncEta(pluginId, isEnabling);
+  setSyncingState(etaMs, isEnabling ? count : 0);
+
+  vscode.postMessage({
+    command: 'togglePluginProject',
+    workspaceRoot: workspaceRoot,
+    pluginPath: pluginPath,
+    id: pluginId,
+    action: action,
+    etaMs: etaMs,
+    skillsCount: count
+  });
+}
+window.togglePluginProject = togglePluginProject;
+
+function toggleSkillGlobal(skillId, enable, altName = null, physicalPath = null) {
+  setSyncingState(2100);
+  // Non-blocking: only show loader for this specific skill, never lock other items
+  trackItemLoading(skillId);
+  vscode.postMessage({ command: 'toggleSkillGlobal', id: skillId, enable: enable, altName: altName || null, physicalPath: physicalPath || null });
+}
+window.toggleSkillGlobal = toggleSkillGlobal;
+
+function toggleSkillProject(workspaceRoot, skillPath, skillId, action) {
+  setSyncingState(2100);
+  vscode.postMessage({
+    command: 'toggleSkillProject',
+    workspaceRoot: workspaceRoot,
+    physicalPath: skillPath,
+    id: skillId,
+    action: action
+  });
+}
+window.toggleSkillProject = toggleSkillProject;
+
+function disconnectFolder(sourceFile, configuredPath) {
+  setSyncingState(2100);
+  vscode.postMessage({
+    command: 'disconnectFolder',
+    sourceFile: sourceFile,
+    configuredPath: configuredPath
+  });
+}
+window.disconnectFolder = disconnectFolder;
+
+function toggleItem(category, itemId, enable, physicalPath = null) {
+  setSyncingState(2100);
+  if (category === 'plugin') {
+    togglePluginGlobal(itemId, enable, physicalPath);
+  } else if (category === 'skill') {
+    toggleSkillGlobal(itemId, enable, null, physicalPath);
+  } else {
+    // Non-blocking: only show loader for this specific item, never lock other items
+    trackItemLoading(itemId);
+    vscode.postMessage({ command: 'toggle', category: category, id: itemId, enable: enable });
+  }
+}
+window.toggleItem = toggleItem;
+
+function openItemFolder(category, itemId, isEnabled, isLocal, physicalPath) {
   vscode.postMessage({
     command: 'openItemFolder',
     category: category,
@@ -221,27 +891,32 @@ window.openItemFolder = function(category, itemId, isEnabled, isLocal, physicalP
     isLocal: !!isLocal,
     physicalPath: physicalPath || ''
   });
-};
+}
+window.openItemFolder = openItemFolder;
 
-window.openFileInEditor = function(category, physicalPath, itemId) {
+function openFileInEditor(category, physicalPath, itemId) {
   vscode.postMessage({
     command: 'openFileInEditor',
     category: category,
     physicalPath: physicalPath,
     id: itemId
   });
-};
+}
+window.openFileInEditor = openFileInEditor;
 
-window.toggleMcpServer = function(physicalPath, serverName, enable) {
+function toggleMcpServer(physicalPath, serverName, enable) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'toggleMcpServer',
     physicalPath: physicalPath,
     serverName: serverName,
     enable: enable
   });
-};
+}
+window.toggleMcpServer = toggleMcpServer;
 
-window.moveItem = function(itemId, category, sourcePluginId, isEnabled, isLocal, physicalPath) {
+function moveItem(itemId, category, sourcePluginId, isEnabled, isLocal, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'requestMove',
     itemId: itemId,
@@ -251,9 +926,11 @@ window.moveItem = function(itemId, category, sourcePluginId, isEnabled, isLocal,
     isLocal: !!isLocal,
     physicalPath: physicalPath || ''
   });
-};
+}
+window.moveItem = moveItem;
 
-window.deleteItem = function(category, itemId, displayName, physicalPath) {
+function deleteItem(category, itemId, displayName, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'deleteItem',
     category: category,
@@ -261,50 +938,61 @@ window.deleteItem = function(category, itemId, displayName, physicalPath) {
     displayName: displayName || itemId,
     physicalPath: physicalPath || ''
   });
-};
+}
+window.deleteItem = deleteItem;
 
-window.toggleHook = function(physicalPath, hookName, enable) {
+function toggleHook(physicalPath, hookName, enable) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'toggleHook',
     physicalPath: physicalPath,
     hookName: hookName,
     enable: enable
   });
-};
+}
+window.toggleHook = toggleHook;
 
-window.deleteHook = function(hookName, physicalPath) {
+function deleteHook(hookName, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'deleteHook',
     hookName: hookName,
     physicalPath: physicalPath
   });
-};
+}
+window.deleteHook = deleteHook;
 
-window.deleteMcpServer = function(serverName, physicalPath) {
+function deleteMcpServer(serverName, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'deleteMcpServer',
     serverName: serverName,
     physicalPath: physicalPath
   });
-};
+}
+window.deleteMcpServer = deleteMcpServer;
 
-window.moveMcpServer = function(serverName, physicalPath) {
+function moveMcpServer(serverName, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'moveMcp',
     serverName: serverName,
     physicalPath: physicalPath
   });
-};
+}
+window.moveMcpServer = moveMcpServer;
 
-window.moveHook = function(hookName, physicalPath) {
+function moveHook(hookName, physicalPath) {
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'moveHook',
     hookName: hookName,
     physicalPath: physicalPath
   });
-};
+}
+window.moveHook = moveHook;
 
-window.editMetadata = function(field) {
+function editMetadata(field) {
   if (!activePluginId) return;
   const plugin = pluginsData.find(p => p.id === activePluginId);
   if (!plugin) return;
@@ -323,11 +1011,10 @@ window.editMetadata = function(field) {
     field: field,
     value: currentValue
   });
-};
+}
+window.editMetadata = editMetadata;
 
-let previousTabBeforePluginDetails = null;
-
-window.openPluginDetails = function(pluginId) {
+function openPluginDetails(pluginId) {
   if (currentTab !== 'plugins') {
     previousTabBeforePluginDetails = currentTab;
   }
@@ -341,18 +1028,27 @@ window.openPluginDetails = function(pluginId) {
   document.getElementById('tab-btn-plugins')?.classList.add('active');
   if (listSectionTitle) listSectionTitle.textContent = t('tabPlugins', 'Plugins');
   renderCurrentTab();
-};
+  if (typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
+window.openPluginDetails = openPluginDetails;
 
-window.closePluginDetails = function() {
+function closePluginDetails() {
   activePluginId = null;
+  if (searchInput) searchInput.value = '';
   if (previousTabBeforePluginDetails) {
     const prev = previousTabBeforePluginDetails;
     previousTabBeforePluginDetails = null;
     switchTab(prev);
   } else {
     renderCurrentTab();
+    if (typeof window.scrollTo === 'function') {
+      window.scrollTo(0, 0);
+    }
   }
-};
+}
+window.closePluginDetails = closePluginDetails;
 
 function escapeQuotes(str) {
   if (str === null || str === undefined) return '';
@@ -386,65 +1082,260 @@ function renderPluginDetailsView() {
     return;
   }
 
-  document.getElementById('main-view').style.display = 'none';
-  document.getElementById('detail-view').style.display = 'block';
+  const mainViewTop = document.getElementById('main-view-top');
+  const mainNav = document.getElementById('main-nav-controls');
+  const detailNav = document.getElementById('detail-nav-controls');
+  const mainView = document.getElementById('main-view');
+  const detailView = document.getElementById('detail-view');
 
-  document.getElementById('detail-plugin-title-name').textContent = plugin.displayName || plugin.name || plugin.id;
+  if (mainViewTop) mainViewTop.style.display = 'none';
+  if (mainNav) mainNav.style.display = 'none';
+  if (detailNav) detailNav.style.display = 'block';
+  if (mainView) mainView.style.display = 'none';
+  if (detailView) detailView.style.display = 'block';
 
-  document.getElementById('meta-name').textContent = plugin.name || plugin.id || '';
-  document.getElementById('meta-display-name').textContent = plugin.displayName || '';
-  document.getElementById('meta-description').textContent = plugin.description || t('noDescription', 'No description.');
-  document.getElementById('meta-version').textContent = plugin.version || '1.0.0';
-  document.getElementById('meta-author').textContent = plugin.author || '';
+  const pluginDisplayName = plugin.displayName || plugin.name || plugin.id;
+  const rawId = plugin.id || plugin.name;
 
-  const openFolderBtn = document.getElementById('btn-open-plugin-folder');
-  if (openFolderBtn) {
-    openFolderBtn.onclick = () => {
+  // Unified Header elements update
+  const backBtn = document.getElementById('nav-btn-back');
+  if (backBtn) backBtn.style.display = 'inline-flex';
+
+  const listTitle = document.getElementById('list-section-title');
+  if (listTitle) {
+    listTitle.textContent = t('pluginDetails', 'Plugin Details') + ': ' + pluginDisplayName;
+  }
+
+  const btnGrouping = document.getElementById('btn-toggle-grouping');
+  if (btnGrouping) btnGrouping.style.display = 'none';
+
+  const btnCreateLabel = document.getElementById('btn-create-label');
+  if (btnCreateLabel) btnCreateLabel.textContent = t('createSkill', 'Create Skill');
+
+  if (searchInput) {
+    searchInput.placeholder = t('searchPluginResources', 'Search plugin skills, rules, MCP...');
+  }
+
+  // Title in header
+  const titleNameEl = document.getElementById('detail-plugin-title-name');
+  if (titleNameEl) {
+    titleNameEl.textContent = pluginDisplayName;
+  }
+
+  // Hero Display Name & ID
+  const heroNameEl = document.getElementById('hero-display-name');
+  if (heroNameEl) heroNameEl.textContent = pluginDisplayName;
+
+  const heroCopyTitleBtn = document.getElementById('hero-copy-title-btn');
+  if (heroCopyTitleBtn) {
+    heroCopyTitleBtn.onclick = function() { copyText(this, rawId); };
+  }
+
+  const heroIdBadge = document.getElementById('hero-id-badge');
+  const heroIdEl = document.getElementById('hero-id-text');
+  const heroCopyIdBtn = document.getElementById('hero-copy-id-btn');
+
+  // Only display the separate ID badge if displayName is distinct from the raw ID
+  if (heroIdBadge) {
+    if (plugin.displayName && plugin.displayName !== rawId) {
+      heroIdBadge.style.display = 'inline-flex';
+      if (heroIdEl) heroIdEl.textContent = 'id: ' + rawId;
+      if (heroCopyIdBtn) {
+        heroCopyIdBtn.onclick = function() { copyText(this, rawId); };
+      }
+    } else {
+      heroIdBadge.style.display = 'none';
+    }
+  }
+
+  // Hero Version & Author
+  const heroVerEl = document.getElementById('hero-version');
+  if (heroVerEl) heroVerEl.textContent = 'v' + (plugin.version || '1.0.0');
+
+  const heroAuthorContainer = document.getElementById('hero-author-container');
+  const heroAuthorEl = document.getElementById('hero-author');
+  if (heroAuthorContainer && heroAuthorEl) {
+    if (plugin.author) {
+      heroAuthorEl.textContent = plugin.author;
+      heroAuthorContainer.style.display = 'inline-flex';
+    } else {
+      heroAuthorContainer.style.display = 'none';
+    }
+  }
+
+  // Hero Scope Badge
+  const scopeContainer = document.getElementById('hero-scope-badge');
+  if (scopeContainer) {
+    if (plugin.isLocal) {
+      scopeContainer.innerHTML = `
+        <div class="res-tag active res-local" style="font-size: 10px; padding: 2px 6px;">
+          <span class="res-indicator"></span>
+          <span>${t('badgeLocal', 'Local')} • ${escapeHtml(plugin.workspaceName || '')}</span>
+        </div>
+      `;
+    } else if (plugin.source === 'configured' || plugin.sourceLabel) {
+      scopeContainer.innerHTML = `
+        <div class="res-tag active res-custom-repo" style="font-size: 10px; padding: 2px 6px; background: rgba(147, 51, 234, 0.15); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.3);">
+          <span class="res-indicator" style="background: #c084fc;"></span>
+          <span>📁 ${escapeHtml(plugin.sourceLabel || t('scopeCustomRepo', 'External Folder'))}</span>
+        </div>
+      `;
+    } else {
+      scopeContainer.innerHTML = `
+        <div class="res-tag active res-global" style="font-size: 10px; padding: 2px 6px;">
+          <span class="res-indicator"></span>
+          <span>${t('scopeStandardGlobal', 'Global (~/.gemini)')}</span>
+        </div>
+      `;
+    }
+  }
+
+  // Hero Status Badge
+  const statusContainer = document.getElementById('hero-status-badge');
+  if (statusContainer) {
+    statusContainer.innerHTML = getStatusPillHtml(plugin, 'plugin');
+  }
+
+  // Global Toggle & Workspace Badge
+  const heroSwitch = document.getElementById('hero-switch-container');
+  const heroWsBadge = document.getElementById('hero-workspace-badge');
+  const heroToggle = document.getElementById('hero-plugin-toggle');
+  if (plugin.isLocal) {
+    if (heroSwitch) heroSwitch.style.display = 'none';
+    if (heroWsBadge) heroWsBadge.style.display = 'block';
+  } else {
+    if (heroSwitch) heroSwitch.style.display = 'flex';
+    if (heroWsBadge) heroWsBadge.style.display = 'none';
+    if (heroToggle) {
+      heroToggle.disabled = false;
+      heroToggle.checked = plugin.isGloballyEnabled;
+      heroToggle.title = plugin.source === 'global' && (plugin.isEnabledForProject || plugin.projectOverride === 'enabled') ? t('tooltipPluginGlobalToggleProjectWarn', 'Внимание: плагин подключен к проекту. Глобальное отключение заблокирует его и в проекте!') : '';
+      heroToggle.onchange = (e) => {
+        togglePluginGlobal(plugin.id, e.target.checked, plugin.physicalPath);
+      };
+    }
+  }
+
+  // Project Override in Hero Card
+  const heroProjContainer = document.getElementById('hero-project-override-container');
+  if (heroProjContainer) {
+    const activeWs = getActiveWorkspaceRoot();
+    if (activeWs && !plugin.isLocal && plugin.physicalPath) {
+      heroProjContainer.style.display = 'block';
+      const overrideState = plugin.projectOverride || (plugin.projectActive === true ? 'enabled' : (plugin.projectActive === false ? 'disabled' : 'none'));
+      const isAuto = overrideState === 'none';
+      const isForcedOn = overrideState === 'enabled';
+      const isForcedOff = overrideState === 'disabled';
+      heroProjContainer.innerHTML = `
+        <div class="project-segmented-control" title="${t('tooltipProjectSegmented', 'Project override')}">
+          <span class="project-seg-label">${t('projectPrefix', 'Проект:')}</span>
+          <div class="project-seg-group">
+            <button class="project-seg-btn ${isAuto ? 'active' : ''}" title="${t('tooltipSegAuto', 'Default: Inherits global status')}" onclick="togglePluginProject('${escapeQuotes(activeWs)}', '${escapeQuotes(plugin.physicalPath)}', '${escapeQuotes(plugin.id)}', 'reset')">${t('optAuto', 'По умолч.')}</button>
+            <button class="project-seg-btn seg-on ${isForcedOn ? 'active' : ''}" title="${plugin.source === 'global' && !plugin.isGloballyEnabled ? t('tooltipPluginSegOnGlobalDisabledWarn', 'Внимание: плагин отключен глобально. Из-за ядра Antigravity в дефолтной папке проект не сможет его загрузить. Переместите в библиотеку [→]') : t('tooltipSegOn', 'Force enable for this project')}" onclick="togglePluginProject('${escapeQuotes(activeWs)}', '${escapeQuotes(plugin.physicalPath)}', '${escapeQuotes(plugin.id)}', 'enable')">✓ ${t('optOn', 'Вкл')}</button>
+            <button class="project-seg-btn seg-off ${isForcedOff ? 'active' : ''}" title="${t('tooltipSegOff', 'Force disable for this project')}" onclick="togglePluginProject('${escapeQuotes(activeWs)}', '${escapeQuotes(plugin.physicalPath)}', '${escapeQuotes(plugin.id)}', 'disable')">✕ ${t('optOff', 'Выкл')}</button>
+          </div>
+        </div>
+      `;
+    } else {
+      heroProjContainer.style.display = 'none';
+      heroProjContainer.innerHTML = '';
+    }
+  }
+
+  // Hero Update Container
+  const heroUpdateBox = document.getElementById('hero-update-container');
+  if (heroUpdateBox) {
+    const uInfo = updatesData && updatesData.updates ? updatesData.updates[plugin.id] : null;
+    if (uInfo && uInfo.hasUpdate) {
+      heroUpdateBox.style.display = 'block';
+      heroUpdateBox.innerHTML = `
+        <div class="hero-update-alert">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">🚀</span>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #93c5fd;">${t('updateAvailable', 'Update available')}: v${escapeHtml(uInfo.remoteVersion)}</div>
+              <div style="font-size: 10px; color: var(--text-muted);">${t('currentVersion', 'Current')}: v${escapeHtml(plugin.version || '1.0.0')}</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${uInfo.repoUrl ? `<a href="${escapeQuotes(uInfo.repoUrl)}" target="_blank" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; height: 24px; text-decoration: none; display: inline-flex; align-items: center;">${t('viewChangelog', 'Changelog')} ↗</a>` : ''}
+            <button class="btn" style="padding: 3px 10px; font-size: 11px; height: 24px; background: #2563eb; color: white; display: inline-flex; align-items: center; gap: 4px;" onclick="openPluginUpdateModal('${escapeQuotes(plugin.id)}', event)">
+              <span>⚡ ${t('updateNow', 'Update')}</span>
+            </button>
+          </div>
+        </div>
+      `;
+    } else {
+      heroUpdateBox.style.display = 'none';
+      heroUpdateBox.innerHTML = '';
+    }
+  }
+
+  // Hero Actions Bar
+  const btnHeroFolder = document.getElementById('btn-hero-open-folder');
+  if (btnHeroFolder) {
+    btnHeroFolder.onclick = () => {
       openItemFolder('plugin', plugin.id, plugin.isEnabled, plugin.isLocal, plugin.physicalPath);
     };
   }
-
-  const detailToggle = document.getElementById('detail-plugin-toggle');
-  const detailSwitchContainer = document.getElementById('detail-switch-container');
-  const detailLoader = document.getElementById('detail-loader');
-  
-  if (detailSwitchContainer) {
-    detailSwitchContainer.style.display = plugin.isLocal ? 'none' : 'block';
-  }
-  if (detailLoader) {
-    detailLoader.style.display = 'none';
-  }
-
-  if (detailToggle) {
-    detailToggle.disabled = false;
-    detailToggle.checked = plugin.isEnabled;
-    detailToggle.onchange = (e) => {
-      toggleItem('plugin', plugin.id, e.target.checked);
+  const btnHeroManifest = document.getElementById('btn-hero-open-manifest');
+  if (btnHeroManifest) {
+    btnHeroManifest.onclick = () => {
+      openFileInEditor('plugin', plugin.physicalPath);
     };
   }
-
-  const btnMove = document.getElementById('detail-btn-move');
-  if (btnMove) {
-    btnMove.onclick = () => {
+  const btnHeroMove = document.getElementById('btn-hero-move');
+  if (btnHeroMove) {
+    btnHeroMove.onclick = () => {
       moveItem(plugin.id, 'plugin', null, plugin.isEnabled, plugin.isLocal, plugin.physicalPath);
     };
   }
-
-  const btnDelete = document.getElementById('detail-btn-delete');
-  if (btnDelete) {
-    btnDelete.onclick = () => {
+  const btnHeroDelete = document.getElementById('btn-hero-delete');
+  if (btnHeroDelete) {
+    btnHeroDelete.onclick = () => {
       deleteItem('plugin', plugin.id, plugin.displayName, plugin.physicalPath);
     };
   }
 
+  // Hero Path Strip
+  const heroPathVal = document.getElementById('hero-path-value');
+  if (heroPathVal) {
+    heroPathVal.textContent = plugin.physicalPath || '';
+    heroPathVal.onclick = () => {
+      openItemFolder('plugin', plugin.id, plugin.isEnabled, plugin.isLocal, plugin.physicalPath);
+    };
+  }
+  const heroCopyPathBtn = document.getElementById('hero-copy-path-btn');
+  if (heroCopyPathBtn) {
+    heroCopyPathBtn.onclick = (e) => {
+      copyText(e.currentTarget, plugin.physicalPath || '');
+    };
+  }
+
+  // Hero Description
+  const heroDescEl = document.getElementById('hero-description');
+  if (heroDescEl) {
+    heroDescEl.textContent = plugin.description || t('noDescription', 'No description.');
+  }
+
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
   // Render Skills
-  const hasSkills = plugin.skills && plugin.skills.length > 0;
+  let skillsList = plugin.skills || [];
+  if (query) {
+    skillsList = skillsList.filter(s =>
+      String(s.displayName || '').toLowerCase().includes(query) ||
+      String(s.name || '').toLowerCase().includes(query) ||
+      (s.description && String(s.description).toLowerCase().includes(query))
+    );
+  }
+  const hasSkills = skillsList.length > 0;
   document.getElementById('detail-skills-section').style.display = hasSkills ? 'block' : 'none';
   const skillsContainer = document.getElementById('detail-skills-list');
   if (hasSkills) {
-    skillsContainer.innerHTML = plugin.skills.map(s => {
+    skillsContainer.innerHTML = skillsList.map(s => {
       return `
-        <div class="glass-card plugin-card">
+        <div class="glass-card plugin-card ${getCardStateClass(s)}">
           <div class="plugin-top">
             <div class="plugin-meta">
               <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/${s.name}">
@@ -455,25 +1346,16 @@ function renderPluginDetailsView() {
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                   </svg>
                 </button>
+                ${s.displayName && s.displayName !== s.name ? `<span class="plugin-human-title" style="font-size: 11px; opacity: 0.85;">${escapeHtml(s.displayName)}</span>` : ''}
+              </div>
+              <div class="card-status-subrow">
+                ${getStatusPillHtml(s, 'skill')}
               </div>
               <div class="plugin-desc" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</div>
-              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-                ${plugin.isLocal ? `
-                  <div class="resource-tags" style="margin-top: 0;">
-                    <div class="res-tag active res-mcp" style="font-size: 10px; padding: 2px 5px;">
-                      <span class="res-indicator"></span>
-                      <span>${t('local', 'Local')} • ${escapeHtml(plugin.workspaceName)}</span>
-                    </div>
-                  </div>
-                ` : ''}
-                <div class="plugin-human-title">
-                  ${escapeHtml(s.displayName)}
-                </div>
-              </div>
             </div>
             
             <div class="card-right-group">
-              <div class="card-actions">
+              <div class="card-actions-top">
                 <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('skill', '${escapeQuotes(s.physicalPath)}')">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -489,7 +1371,10 @@ function renderPluginDetailsView() {
                   </svg>
                 </button>
               </div>
-              <div class="card-actions-row3">
+              <div class="card-actions-middle">
+                <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
+              </div>
+              <div class="card-actions-bottom">
                 <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveItem('${s.id}', 'skill', '${plugin.id}', ${plugin.isEnabled}, ${plugin.isLocal ? 'true' : 'false'}, '${escapeQuotes(s.physicalPath)}')">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="17 8 21 12 17 16"></polyline>
@@ -505,6 +1390,16 @@ function renderPluginDetailsView() {
               </div>
             </div>
           </div>
+          ${plugin.isLocal ? `
+            <div class="card-footer-tags">
+              <div class="resource-tags">
+                <div class="res-tag active res-local" style="font-size: 10px; padding: 2px 5px;">
+                  <span class="res-indicator"></span>
+                  <span>${t('local', 'Local')} • ${escapeHtml(plugin.workspaceName)}</span>
+                </div>
+              </div>
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
@@ -539,18 +1434,33 @@ function renderPluginDetailsView() {
   if (rulesList.length === 0 && rulesData && rulesData.length > 0) {
     rulesList = rulesData.filter(r => r.pluginId === plugin.id || r.pluginId === plugin.name);
   }
+  if (query) {
+    rulesList = rulesList.filter(r =>
+      String(r.displayName || '').toLowerCase().includes(query) ||
+      String(r.name || '').toLowerCase().includes(query) ||
+      (r.description && String(r.description).toLowerCase().includes(query))
+    );
+  }
   const hasRules = rulesList.length > 0;
   document.getElementById('detail-rules-section').style.display = hasRules ? 'block' : 'none';
   const rulesContainer = document.getElementById('detail-rules-list');
   if (hasRules) {
     rulesContainer.innerHTML = rulesList.map(r => {
       const isAct = plugin.isEnabled;
+      const rFileName = r.physicalPath ? r.physicalPath.split(/[\/\\]/).pop() : (r.name || r.displayName);
+      const rTag = '@' + rFileName;
       return `
       <div class="resource-item">
         <div class="resource-info">
           <div class="resource-name" style="display: flex; align-items: center; gap: 6px;" title="${escapeHtml(r.displayName)}">
             <span style="width: 7px; height: 7px; border-radius: 50%; background: ${isAct ? '#34d399' : '#ef4444'}; box-shadow: 0 0 6px ${isAct ? 'rgba(52,211,153,0.6)' : 'rgba(239,68,68,0.6)'}; display: inline-block; flex-shrink: 0;"></span>
             <span>${escapeHtml(r.displayName)}</span>
+            <button class="copy-name-btn" onclick="copyText(this, '${escapeQuotes(rTag)}')" title="${t('copyRuleTag', 'Copy context tag (@rule)')}">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
           </div>
           ${r.description ? `<div class="resource-desc" title="${escapeHtml(r.description)}">${escapeHtml(r.description)}</div>` : ''}
         </div>
@@ -590,6 +1500,13 @@ function renderPluginDetailsView() {
   let workflowsList = plugin.workflows || [];
   if (workflowsList.length === 0 && workflowsData && workflowsData.length > 0) {
     workflowsList = workflowsData.filter(w => w.pluginId === plugin.id || w.pluginId === plugin.name);
+  }
+  if (query) {
+    workflowsList = workflowsList.filter(w =>
+      String(w.displayName || '').toLowerCase().includes(query) ||
+      String(w.name || '').toLowerCase().includes(query) ||
+      (w.description && String(w.description).toLowerCase().includes(query))
+    );
   }
   const hasWorkflows = workflowsList.length > 0;
   const workflowsSection = document.getElementById('detail-workflows-section');
@@ -647,6 +1564,13 @@ function renderPluginDetailsView() {
   if (mcpList.length === 0 && mcpData && mcpData.length > 0) {
     mcpList = mcpData.filter(m => m.pluginId === plugin.id || m.pluginId === plugin.name);
   }
+  if (query) {
+    mcpList = mcpList.filter(m =>
+      String(m.name || '').toLowerCase().includes(query) ||
+      String(m.command || '').toLowerCase().includes(query) ||
+      (m.description && String(m.description).toLowerCase().includes(query))
+    );
+  }
   const hasMcp = mcpList.length > 0;
   const mcpSection = document.getElementById('detail-mcp-section');
   if (mcpSection) {
@@ -703,6 +1627,14 @@ function renderPluginDetailsView() {
   let hooksList = plugin.hooks || [];
   if (hooksList.length === 0 && hooksData && hooksData.length > 0) {
     hooksList = hooksData.filter(h => h.pluginId === plugin.id || h.pluginId === plugin.name);
+  }
+  if (query) {
+    hooksList = hooksList.filter(h =>
+      String(h.displayName || '').toLowerCase().includes(query) ||
+      String(h.name || '').toLowerCase().includes(query) ||
+      String(h.event || '').toLowerCase().includes(query) ||
+      String(h.command || '').toLowerCase().includes(query)
+    );
   }
   const hasHooks = hooksList.length > 0;
   const hooksSection = document.getElementById('detail-hooks-section');
@@ -792,8 +1724,8 @@ function renderGroupedGrid(items, renderCardFn, emptyMessageKey, emptyMessageDef
   plugins.sort(sortFn);
 
   const groups = [];
-  if (global.length > 0) groups.push({ key: 'global', title: t('groupGlobal', 'Global'), icon: '🌐', items: global });
   if (local.length > 0) groups.push({ key: 'local', title: t('groupWorkspace', 'Workspace / Local'), icon: '📁', items: local });
+  if (global.length > 0) groups.push({ key: 'global', title: t('groupGlobal', 'Global'), icon: '🌐', items: global });
   if (builtin.length > 0) groups.push({ key: 'builtin', title: t('groupBuiltin', 'Built-in'), icon: '🔷', items: builtin });
   if (plugins.length > 0) groups.push({ key: 'plugin', title: t('groupPlugins', 'From Plugins'), icon: '🔌', items: plugins });
 
@@ -825,55 +1757,322 @@ function renderGroupedGrid(items, renderCardFn, emptyMessageKey, emptyMessageDef
 
 function getScopeBadgeHtml(item) {
   if (item.isBuiltin || item.source === 'builtin') {
-    return `<div class="res-tag active res-builtin" style="font-size: 10px; padding: 2px 5px;"><span class="res-indicator"></span><span>${t('badgeBuiltin', 'Built-in')}</span></div>`;
+    return `<div class="res-tag active res-builtin" style="font-size: 10px; padding: 2px 5px;" title="${escapeHtml(item.physicalPath || '')}"><span class="res-indicator"></span><span>${t('badgeBuiltin', 'Built-in')}</span></div>`;
   }
   if (item.isLocal || item.isWorkspace) {
     const wsName = item.workspaceName ? ` • ${escapeHtml(item.workspaceName)}` : '';
-    return `<div class="res-tag active res-local" style="font-size: 10px; padding: 2px 5px;"><span class="res-indicator"></span><span>${t('badgeLocal', 'Local')}${wsName}</span></div>`;
+    return `<div class="res-tag active res-local" style="font-size: 10px; padding: 2px 5px;" title="${escapeHtml(item.physicalPath || '')}"><span class="res-indicator"></span><span>${t('badgeLocal', 'Local')}${wsName}</span></div>`;
   }
   if (item.isPlugin || item.pluginId || item.pluginName) {
     const pName = item.pluginDisplayName || item.pluginName || item.pluginId || '';
     const pId = item.pluginId || item.pluginName || '';
-    return `<div class="res-tag active res-plugin clickable" style="font-size: 10px; padding: 2px 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation(); openPluginDetails('${escapeQuotes(pId)}')" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(pName)}"><span class="res-indicator"></span><span>${t('badgePlugin', 'Plugin')}: ${escapeHtml(pName)}</span><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.8;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>`;
+    return `<div class="res-tag active res-plugin clickable" style="font-size: 10px; padding: 2px 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation(); openPluginDetails('${escapeQuotes(pId)}')" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(pName)} (${escapeHtml(item.physicalPath || '')})"><span class="res-indicator"></span><span>${t('badgePlugin', 'Plugin')}: ${escapeHtml(pName)}</span><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.8;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>`;
   }
-  return `<div class="res-tag active res-global" style="font-size: 10px; padding: 2px 5px;"><span class="res-indicator"></span><span>${t('badgeGlobal', 'Global')}</span></div>`;
+  if (item.source === 'configured' || item.sourceLabel) {
+    return `<div class="res-tag active res-custom-repo" style="font-size: 10px; padding: 2px 6px; background: rgba(147, 51, 234, 0.15); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.3);" title="${escapeHtml(item.physicalPath || '')}"><span class="res-indicator" style="background: #c084fc;"></span><span>📁 ${escapeHtml(item.sourceLabel || t('scopeCustomRepo', 'External Folder'))}</span></div>`;
+  }
+  return `<div class="res-tag active res-global" style="font-size: 10px; padding: 2px 5px;" title="${escapeHtml(item.physicalPath || '')}"><span class="res-indicator"></span><span>${t('scopeStandardGlobal', 'Global (~/.gemini)')}</span></div>`;
 }
 
-function renderRuleCard(r, idx) {
-  const scopeBadge = getScopeBadgeHtml(r);
-  let statusBadgeHtml = '';
-  if (r.isPlugin) {
-    if (r.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpPluginActive', 'Active (Plugin enabled)')}</span>`;
+function getCardStateClass(item) {
+  if (!item) return '';
+  if (item.isDefaultGlobalBlocked) return 'card-state-blocked';
+  if (item.isEnabled) return 'card-state-active';
+  return 'card-state-inactive';
+}
+
+function getStatusPillHtml(item, category, currentWs) {
+  let isActive = false;
+  let label = '';
+  let tooltip = '';
+
+  if (category === 'plugin') {
+    if (item.isLocal) {
+      isActive = true;
+      label = t('statusActiveWs', 'Вкл (проект)');
+      tooltip = t('tooltipPluginLocal', 'Локальный плагин проекта (активен в этом проекте)');
     } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('mcpPluginDisabled', 'Disabled (Plugin disabled)')}</span>`;
+      const override = item.projectOverride || (item.projectActive === true ? 'enabled' : (item.projectActive === false ? 'disabled' : 'none'));
+      if (override === 'enabled') {
+        const isDefaultGlobalBlocked = item.source === 'global' && item.isGloballyEnabled === false;
+        if (isDefaultGlobalBlocked) {
+          isActive = false;
+          label = t('statusBlockedWs', 'Заблокирован (ядро)');
+          tooltip = t('tooltipPluginBlockedByRootExclude', 'Плагин подключен в .agents/plugins.json, но заблокирован ядром Antigravity из-за глобального отключения в ~/.gemini/config/plugins.json (или plugin.json). Переместите его в библиотеку [→] для работы в проекте.');
+        } else {
+          isActive = true;
+          label = t('statusActiveWs', 'Вкл (проект)');
+          tooltip = t('tooltipPluginActiveWs', 'Плагин работает, так как принудительно включен на уровне этого проекта (хотя глобально выключен)');
+        }
+      } else if (override === 'disabled') {
+        isActive = false;
+        label = t('statusDisabledWs', 'Выкл (проект)');
+        tooltip = t('tooltipPluginDisabledWs', 'Плагин отключен для этого проекта, так как принудительно выключен на уровне проекта (хотя глобально включен)');
+      } else {
+        if (item.isGloballyEnabled !== false) {
+          isActive = true;
+          label = t('statusActive', 'Включен');
+          tooltip = t('tooltipPluginActiveGlobal', 'Плагин активен по умолчанию (включен глобально)');
+        } else {
+          isActive = false;
+          label = t('statusDisabled', 'Отключен');
+          tooltip = t('tooltipPluginDisabledGlobal', 'Плагин отключен по умолчанию (выключен глобально)');
+        }
+      }
     }
-  } else {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
+  } else if (category === 'skill') {
+    if (item.isBuiltin) {
+      isActive = true;
+      label = t('statusBuiltin', 'Встроенный');
+      tooltip = t('tooltipSkillBuiltin', 'Встроенный системный навык IDE (всегда активен)');
+    } else if (item.isPlugin) {
+      if (item.isEnabled) {
+        isActive = true;
+        label = t('statusActivePlugin', 'Вкл (плагин)');
+        tooltip = t('tooltipSkillPluginActive', 'Навык активен, так как родительский плагин включен');
+      } else {
+        isActive = false;
+        label = t('statusDisabledPlugin', 'Выкл (плагин)');
+        tooltip = t('tooltipSkillPluginDisabled', 'Навык отключен, так как родительский плагин отключен');
+      }
+    } else if (item.isLocal) {
+      if (item.isEnabled !== false) {
+        isActive = true;
+        label = t('statusActiveWs', 'Вкл (проект)');
+        tooltip = t('tooltipSkillLocal', 'Локальный навык текущего проекта (активен)');
+      } else {
+        isActive = false;
+        label = t('statusDisabledWs', 'Выкл (проект)');
+        tooltip = t('tooltipSkillDisabledWs', 'Навык отключен для этого проекта через exclude в .agents/skills.json');
+      }
+    } else {
+      // Global skill
+      const override = item.projectOverride || (item.projectActive === true ? 'enabled' : (item.projectActive === false ? 'disabled' : 'none'));
+      if (override === 'enabled') {
+        const isDefaultGlobalBlocked = item.source === 'global' && item.isGloballyEnabled === false;
+        if (isDefaultGlobalBlocked) {
+          isActive = false;
+          label = t('statusBlockedWs', 'Заблокирован (ядро)');
+          tooltip = t('tooltipSkillBlockedByRootExclude', 'Навык подключен в .agents/skills.json, но заблокирован ядром Antigravity из-за глобального отключения в ~/.gemini/config/skills.json. Переместите его в библиотеку [→] для работы в проекте.');
+        } else {
+          isActive = true;
+          label = t('statusActiveWs', 'Вкл (проект)');
+          tooltip = t('tooltipSkillActiveWs', 'Навык работает, так как принудительно подключен для этого проекта в .agents/skills.json');
+        }
+      } else if (override === 'disabled') {
+        isActive = false;
+        label = t('statusDisabledWs', 'Выкл (проект)');
+        tooltip = t('tooltipSkillDisabledWs', 'Навык отключен для этого проекта через exclude в .agents/skills.json');
+      } else {
+        if (item.isGloballyEnabled !== false) {
+          isActive = true;
+          label = t('statusActive', 'Включен');
+          tooltip = t('tooltipSkillActiveGlobal', 'Навык активен по умолчанию (включен глобально)');
+        } else {
+          isActive = false;
+          label = t('statusDisabled', 'Отключен');
+          tooltip = t('tooltipSkillDisabledGlobal', 'Навык отключен глобально (в exclude в ~/.gemini/config/skills.json)');
+        }
+      }
+    }
+  } else if (category === 'rule') {
+    if (item.isPlugin) {
+      if (item.isEnabled) {
+        isActive = true;
+        label = t('statusActivePlugin', 'Вкл (плагин)');
+        tooltip = t('tooltipRulePluginActive', 'Правило активно, так как родительский плагин включен');
+      } else {
+        isActive = false;
+        label = t('statusDisabledPlugin', 'Выкл (плагин)');
+        tooltip = t('tooltipRulePluginDisabled', 'Правило не действует, так как родительский плагин выключен');
+      }
+    } else if (item.isWorkspace) {
+      isActive = true;
+      label = t('statusActiveWs', 'Вкл (проект)');
+      tooltip = t('tooltipRuleWs', 'Локальное правило текущего проекта (активно)');
+    } else {
+      isActive = true;
+      label = t('statusActive', 'Включен');
+      tooltip = t('tooltipRuleGlobal', 'Глобальное системное правило (всегда активно во всех проектах)');
+    }
+  } else if (category === 'workflow') {
+    if (item.isBuiltin) {
+      isActive = true;
+      label = t('statusBuiltin', 'Встроенный');
+      tooltip = t('tooltipWorkflowBuiltin', 'Встроенный воркфлоу IDE (всегда активен)');
+    } else if (item.isPlugin) {
+      if (item.isEnabled) {
+        isActive = true;
+        label = t('statusActivePlugin', 'Вкл (плагин)');
+        tooltip = t('tooltipWorkflowPluginActive', 'Воркфлоу активен, так как родительский плагин включен');
+      } else {
+        isActive = false;
+        label = t('statusDisabledPlugin', 'Выкл (плагин)');
+        tooltip = t('tooltipWorkflowPluginDisabled', 'Воркфлоу отключен, так как родительский плагин отключен');
+      }
+    } else if (item.isLocal) {
+      isActive = true;
+      label = t('statusActiveWs', 'Вкл (проект)');
+      tooltip = t('tooltipWorkflowWs', 'Локальный воркфлоу проекта (активен)');
+    } else {
+      if (item.isEnabled !== false) {
+        isActive = true;
+        label = t('statusActive', 'Включен');
+        tooltip = t('tooltipWorkflowActive', 'Воркфлоу активен');
+      } else {
+        isActive = false;
+        label = t('statusDisabled', 'Отключен');
+        tooltip = t('tooltipWorkflowDisabled', 'Воркфлоу отключен');
+      }
+    }
+  } else if (category === 'mcp') {
+    if (item.isBuiltin) {
+      isActive = true;
+      label = t('statusBuiltin', 'Встроенный');
+      tooltip = t('tooltipMcpBuiltin', 'Встроенный системный MCP сервер IDE (всегда активен)');
+    } else if (item.isPlugin) {
+      if (item.isEnabled) {
+        isActive = true;
+        label = t('statusActivePlugin', 'Вкл (плагин)');
+        tooltip = t('tooltipMcpPluginActive', 'MCP сервер активен, так как родительский плагин включен');
+      } else {
+        isActive = false;
+        label = t('statusDisabledPlugin', 'Выкл (плагин)');
+        tooltip = t('tooltipMcpPluginDisabled', 'MCP сервер отключен, так как родительский плагин отключен');
+      }
+    } else {
+      const isAct = item.enabled !== false;
+      isActive = isAct;
+      label = isAct ? t('statusActive', 'Включен') : t('statusDisabled', 'Отключен');
+      tooltip = isAct ? t('tooltipMcpActive', 'MCP сервер активен в конфигурации') : t('tooltipMcpDisabled', 'MCP сервер отключен в конфигурации (disabled: true)');
+    }
+  } else if (category === 'hook') {
+    if (item.isProtected) {
+      isActive = true;
+      label = t('statusBuiltin', 'Встроенный');
+      tooltip = t('tooltipHookBuiltin', 'Встроенный системный хук IDE (всегда активен)');
+    } else if (item.isPlugin) {
+      if (item.isEnabled) {
+        isActive = true;
+        label = t('statusActivePlugin', 'Вкл (плагин)');
+        tooltip = t('tooltipHookPluginActive', 'Хук активен, так как родительский плагин включен');
+      } else {
+        isActive = false;
+        label = t('statusDisabledPlugin', 'Выкл (плагин)');
+        tooltip = t('tooltipHookPluginDisabled', 'Хук отключен, так как родительский плагин отключен');
+      }
+    } else {
+      const isAct = item.enabled !== false;
+      isActive = isAct;
+      label = isAct ? t('statusActive', 'Включен') : t('statusDisabled', 'Отключен');
+      tooltip = isAct ? t('tooltipHookActive', 'Хук активен в hooks.json (enabled: true)') : t('tooltipHookDisabled', 'Хук отключен в hooks.json (enabled: false)');
+    }
   }
 
   return `
-    <div class="glass-card plugin-card">
+    <span class="card-status-pill ${isActive ? 'active' : 'inactive'}" title="${escapeQuotes(tooltip)}">
+      <span class="status-dot ${isActive ? 'dot-active' : 'dot-inactive'}"></span>
+      <span>${escapeHtml(label)}</span>
+      <span class="status-help-q">?</span>
+    </span>
+  `;
+}
+
+function renderPluginCard(p, idx) {
+  const skillsCount = p.skillsCount !== undefined ? p.skillsCount : (p.skills ? p.skills.length : 0);
+  const rulesCount = p.rulesCount !== undefined ? p.rulesCount : (p.rules ? p.rules.length : 0);
+  const hooksCount = p.hooksCount !== undefined ? p.hooksCount : (p.hooks ? p.hooks.length : 0);
+  const hasSkills = skillsCount > 0;
+  const hasRules = rulesCount > 0;
+  const hasHooks = hooksCount > 0;
+
+  let projectOverrideHtml = '';
+  if (workspaceFoldersList.length > 0 && !p.isLocal && p.physicalPath) {
+    const currentWs = getActiveWorkspaceRoot();
+    const overrideState = p.projectOverride || (p.projectActive === true ? 'enabled' : (p.projectActive === false ? 'disabled' : 'none'));
+    const isAuto = overrideState === 'none';
+    const isForcedOn = overrideState === 'enabled';
+    const isForcedOff = overrideState === 'disabled';
+
+    projectOverrideHtml = `
+      <div class="project-segmented-control" title="${t('tooltipProjectSegmented', 'Project override: Default, Force On, or Force Off')}">
+        <span class="project-seg-label">${t('projectPrefix', 'Проект:')}</span>
+        <div class="project-seg-group">
+          <button class="project-seg-btn ${isAuto ? 'active' : ''}" title="${t('tooltipSegAuto', 'Default: Inherits global status')}" onclick="event.stopPropagation(); togglePluginProject('${escapeQuotes(currentWs)}', '${escapeQuotes(p.physicalPath)}', '${escapeQuotes(p.id)}', 'reset')">${t('optAuto', 'По умолч.')}</button>
+          <button class="project-seg-btn seg-on ${isForcedOn ? 'active' : ''}" title="${p.source === 'global' && !p.isGloballyEnabled ? t('tooltipPluginSegOnGlobalDisabledWarn', 'Внимание: плагин отключен глобально. Из-за ядра Antigravity в дефолтной папке проект не сможет его загрузить. Переместите в библиотеку [→]') : t('tooltipSegOn', 'Force enable for this project')}" onclick="event.stopPropagation(); togglePluginProject('${escapeQuotes(currentWs)}', '${escapeQuotes(p.physicalPath)}', '${escapeQuotes(p.id)}', 'enable')">✓ ${t('optOn', 'Вкл')}</button>
+          <button class="project-seg-btn seg-off ${isForcedOff ? 'active' : ''}" title="${t('tooltipSegOff', 'Force disable for this project')}" onclick="event.stopPropagation(); togglePluginProject('${escapeQuotes(currentWs)}', '${escapeQuotes(p.physicalPath)}', '${escapeQuotes(p.id)}', 'disable')">✕ ${t('optOff', 'Выкл')}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  let scopeBadgeHtml = '';
+  if (p.isLocal) {
+    scopeBadgeHtml = `
+      <div class="res-tag active res-local" style="font-size: 10px; padding: 2px 6px;" title="${escapeHtml(p.physicalPath || '')}">
+        <span class="res-indicator"></span>
+        <span>${t('badgeLocal', 'Local')} • ${escapeHtml(p.workspaceName || '')}</span>
+      </div>
+    `;
+  } else if (p.source === 'configured' || p.sourceLabel) {
+    scopeBadgeHtml = `
+      <div class="res-tag active res-custom-repo" style="font-size: 10px; padding: 2px 6px; background: rgba(147, 51, 234, 0.15); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.3);" title="${escapeHtml(p.physicalPath || '')}">
+        <span class="res-indicator" style="background: #c084fc;"></span>
+        <span>📁 ${escapeHtml(p.sourceLabel || t('scopeCustomRepo', 'External Folder'))}</span>
+      </div>
+    `;
+  } else {
+    scopeBadgeHtml = `
+      <div class="res-tag active res-global" style="font-size: 10px; padding: 2px 6px;" title="${escapeHtml(p.physicalPath || '')}">
+        <span class="res-indicator"></span>
+        <span>${t('scopeStandardGlobal', 'Global (~/.gemini)')}</span>
+      </div>
+    `;
+  }
+  const updateInfo = updatesData && updatesData.updates ? updatesData.updates[p.id] : null;
+  const hasUpdate = updateInfo && updateInfo.hasUpdate;
+
+  return `
+    <div class="glass-card plugin-card ${getCardStateClass(p)}">
       <div class="plugin-top">
         <div class="plugin-meta">
-          <div class="plugin-name clickable" style="margin-bottom: 4px;" title="${escapeHtml(r.displayName || r.name)}" onclick="openFileInEditor('rule', '${escapeQuotes(r.physicalPath)}')">
+          <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;">
             <span class="card-index-num">#${idx}</span>
-            ${escapeHtml(r.displayName || r.name)}
+            <span class="plugin-title-text clickable" onclick="openPluginDetails('${p.id}')" title="${escapeHtml(p.displayName)}" style="cursor: pointer; font-weight: 700;">${escapeHtml(p.displayName)}</span>
+            <button class="copy-name-btn" onclick="copyText(this, '${escapeQuotes(p.name || p.displayName)}')" title="${t('copyName', 'Copy name')}">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
           </div>
-          <div class="plugin-desc" title="${escapeHtml(r.description || '')}">${escapeHtml(r.description || '') || t('noDescription', 'No description.')}</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-            <div class="resource-tags" style="margin-top: 0;">
-              ${scopeBadge}
+          
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(p, 'plugin')}
+          </div>
+
+          ${hasUpdate ? `
+            <div class="plugin-update-banner">
+              <span class="plugin-update-tag">🚀 v${escapeHtml(updateInfo.remoteVersion)} ${t('updateAvailable', 'Update available')}</span>
+              <button class="btn-update-now" onclick="openPluginUpdateModal('${escapeQuotes(p.id)}', event)">
+                ⚡ ${t('updateNow', 'Update')}
+              </button>
+              ${updateInfo.repoUrl ? `
+                <a class="btn-update-changelog" href="${escapeQuotes(updateInfo.repoUrl)}" target="_blank" onclick="event.stopPropagation()">
+                  ↗ ${t('viewChangelog', 'Changelog')}
+                </a>
+              ` : ''}
             </div>
-            <div>
-              ${statusBadgeHtml}
-            </div>
+          ` : ''}
+
+          <div class="plugin-desc" id="desc-${p.id}" title="${escapeHtml(p.description || '')}">
+            ${escapeHtml(p.description) || t('noDescription', 'No description.')}
           </div>
         </div>
         
         <div class="card-right-group">
-          <div class="card-actions">
-            <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('rule', '${escapeQuotes(r.physicalPath)}')">
+          <div class="card-actions-top">
+            <button class="card-action-btn" title="${t('openPluginJson', 'Open plugin.json')}" onclick="openFileInEditor('plugin', '${escapeQuotes(p.physicalPath)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
@@ -882,9 +2081,120 @@ function renderRuleCard(r, idx) {
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
-            <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('rule', '${r.id}', true, ${r.isWorkspace ? 'true' : 'false'}, '${escapeQuotes(r.physicalPath)}')">
+            <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('plugin', '${p.id}', ${p.isEnabled}, ${p.isLocal ? 'true' : 'false'}, '${escapeQuotes(p.physicalPath)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="card-actions-middle">
+            ${p.isLocal ? `
+              <span class="card-badge-status">Workspace</span>
+            ` : `
+              <div id="switch-container-${p.id}">
+                <label class="switch" title="${p.source === 'global' && (p.isEnabledForProject || p.projectOverride === 'enabled') ? t('tooltipPluginGlobalToggleProjectWarn', 'Внимание: плагин подключен к проекту. Глобальное отключение заблокирует его и в проекте!') : ''}">
+                  <input type="checkbox" ${p.isGloballyEnabled ? 'checked' : ''} onchange="togglePluginGlobal('${escapeQuotes(p.id)}', this.checked, '${escapeQuotes(p.physicalPath || '')}')">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div id="loader-${p.id}" style="display: none; padding-right: 6px;">
+                <div class="spinner-small"></div>
+              </div>
+            `}
+          </div>
+          <div class="card-actions-bottom">
+            <button class="card-action-btn plugin-move-btn" title="${t('move', 'Move')}" onclick="moveItem('${p.id}', 'plugin', null, ${p.isEnabled}, ${p.isLocal ? 'true' : 'false'}, '${escapeQuotes(p.physicalPath)}')">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="17 8 21 12 17 16"></polyline>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+              </svg>
+            </button>
+            <button class="card-action-btn" title="${t('deleteBtn', 'Delete')}" onclick="deleteItem('plugin', '${p.id}', '${escapeQuotes(p.displayName)}', '${escapeQuotes(p.physicalPath)}')">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadgeHtml}
+          ${hasSkills ? `
+            <div class="res-tag active">
+              <span class="res-indicator"></span>
+              <span>${skillsCount} ${t('skillsCount', 'Skills')}</span>
+            </div>
+          ` : ''}
+          ${hasRules ? `
+            <div class="res-tag active">
+              <span class="res-indicator"></span>
+              <span>${rulesCount} ${t('rulesCount', 'Rules')}</span>
+            </div>
+          ` : ''}
+          ${hasHooks ? `
+            <div class="res-tag active res-hooks">
+              <span class="res-indicator"></span>
+              <span>${hooksCount} ${t('hooks', 'Hooks')}</span>
+            </div>
+          ` : ''}
+          ${p.hasMcp ? `
+            <div class="res-tag active res-mcp">
+              <span class="res-indicator"></span>
+              <span>MCP</span>
+            </div>
+          ` : ''}
+          <div class="plugin-meta-chip">
+            <span>v${escapeHtml(p.version || '1.0.0')}</span>
+            ${p.author ? `<span>•</span> <span>${escapeHtml(p.author)}</span>` : ''}
+          </div>
+        </div>
+        ${projectOverrideHtml ? `
+          <div class="card-project-override-row">
+            ${projectOverrideHtml}
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderRuleCard(r, idx) {
+  const scopeBadge = getScopeBadgeHtml(r);
+  const ruleFileName = r.physicalPath ? r.physicalPath.split(/[\/\\]/).pop() : (r.name || r.displayName);
+  const ruleTag = '@' + ruleFileName;
+
+  return `
+    <div class="glass-card plugin-card ${getCardStateClass(r)}">
+      <div class="plugin-top">
+        <div class="plugin-meta">
+          <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;">
+            <span class="card-index-num">#${idx}</span>
+            <span class="plugin-title-text clickable" onclick="openFileInEditor('rule', '${escapeQuotes(r.physicalPath)}')" title="${escapeHtml(r.displayName || r.name)}" style="cursor: pointer; font-weight: 700;">${escapeHtml(r.displayName || r.name)}</span>
+            <button class="copy-name-btn" onclick="copyText(this, '${escapeQuotes(ruleTag)}')" title="${t('copyRuleTag', 'Copy context tag (@rule)')}">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(r, 'rule')}
+          </div>
+          <div class="plugin-desc" title="${escapeHtml(r.description || '')}">${escapeHtml(r.description || '') || t('noDescription', 'No description.')}</div>
+        </div>
+        
+        <div class="card-right-group">
+          <div class="card-actions-top">
+            <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('rule', '${escapeQuotes(r.physicalPath)}')">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
             ${r.isPlugin ? `
@@ -895,10 +2205,34 @@ function renderRuleCard(r, idx) {
                   <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
               </button>
-            ` : ''}
+            ` : `
+              <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('rule', '${r.id}', true, ${r.isWorkspace ? 'true' : 'false'}, '${escapeQuotes(r.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+            `}
           </div>
-          <div class="card-actions-row3">
+          <div class="card-actions-middle">
+            ${r.isProtected ? `
+              <span class="card-badge-status">${t('protected', 'Protected')}</span>
+            ` : (r.isPlugin ? `
+              <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
+            ` : (r.isWorkspace ? `
+              <span class="card-badge-status">Workspace</span>
+            ` : `
+              <span class="card-badge-status">${t('badgeGlobal', 'Global')}</span>
+            `))}
+          </div>
+          <div class="card-actions-bottom">
             ${!r.isProtected ? `
+              ${r.isPlugin ? `
+                <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('rule', '${r.id}', true, ${r.isWorkspace ? 'true' : 'false'}, '${escapeQuotes(r.physicalPath)}')">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </button>
+              ` : ''}
               <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveItem('${r.id}', 'rule', '${r.pluginId || ''}', true, ${r.isWorkspace ? 'true' : 'false'}, '${escapeQuotes(r.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="17 8 21 12 17 16"></polyline>
@@ -913,10 +2247,13 @@ function renderRuleCard(r, idx) {
                   </svg>
                 </button>
               ` : ''}
-            ` : `
-              <span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">${t('protected', 'Protected')}</span>
-            `}
+            ` : ''}
           </div>
+        </div>
+      </div>
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadge}
         </div>
       </div>
     </div>
@@ -925,28 +2262,30 @@ function renderRuleCard(r, idx) {
 
 function renderSkillCard(s, idx) {
   const scopeBadge = getScopeBadgeHtml(s);
-  let statusBadgeHtml = '';
-  if (s.isBuiltin) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-  } else if (s.isPlugin) {
-    if (s.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpPluginActive', 'Active (Plugin enabled)')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('mcpPluginDisabled', 'Disabled (Plugin disabled)')}</span>`;
-    }
-  } else if (s.isLocal) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-  } else {
-    // Global skill
-    if (s.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('inactive', 'Disabled')}</span>`;
-    }
+
+  let skillProjectOverrideHtml = '';
+  if (workspaceFoldersList.length > 0 && !s.isLocal && !s.isBuiltin && !s.isPlugin && s.physicalPath) {
+    const currentWs = getActiveWorkspaceRoot();
+    const skillName = s.rawId || s.id || (s.name || '');
+    const overrideState = s.projectOverride || (s.projectActive === true ? 'enabled' : (s.projectActive === false ? 'disabled' : 'none'));
+    const isAuto = overrideState === 'none';
+    const isForcedOn = overrideState === 'enabled';
+    const isForcedOff = overrideState === 'disabled';
+
+    skillProjectOverrideHtml = `
+      <div class="project-segmented-control" title="${t('tooltipProjectSegmented', 'Project override: Default, Force On, or Force Off')}">
+        <span class="project-seg-label">${t('projectPrefix', 'Проект:')}</span>
+        <div class="project-seg-group">
+          <button class="project-seg-btn ${isAuto ? 'active' : ''}" title="${t('tooltipSegAuto', 'Default: Inherits global status')}" onclick="event.stopPropagation(); toggleSkillProject('${escapeQuotes(currentWs)}', '${escapeQuotes(s.physicalPath)}', '${escapeQuotes(skillName)}', 'reset')">${t('optAuto', 'По умолч.')}</button>
+          <button class="project-seg-btn seg-on ${isForcedOn ? 'active' : ''}" title="${s.source === 'global' && !s.isGloballyEnabled ? t('tooltipSegOnGlobalDisabledWarn', 'Внимание: навык отключен глобально. Из-за ядра Antigravity в дефолтной папке проект не сможет его загрузить. Переместите в библиотеку [→]') : t('tooltipSegOn', 'Force enable for this project')}" onclick="event.stopPropagation(); toggleSkillProject('${escapeQuotes(currentWs)}', '${escapeQuotes(s.physicalPath)}', '${escapeQuotes(skillName)}', 'enable')">✓ ${t('optOn', 'Вкл')}</button>
+          <button class="project-seg-btn seg-off ${isForcedOff ? 'active' : ''}" title="${t('tooltipSegOff', 'Force disable for this project')}" onclick="event.stopPropagation(); toggleSkillProject('${escapeQuotes(currentWs)}', '${escapeQuotes(s.physicalPath)}', '${escapeQuotes(skillName)}', 'disable')">✕ ${t('optOff', 'Выкл')}</button>
+        </div>
+      </div>
+    `;
   }
 
   return `
-    <div class="glass-card plugin-card">
+    <div class="glass-card plugin-card ${getCardStateClass(s)}">
       <div class="plugin-top">
         <div class="plugin-meta">
           <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/${s.name}">
@@ -958,23 +2297,16 @@ function renderSkillCard(s, idx) {
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
             </button>
+            ${s.displayName && s.displayName !== s.name ? `<span class="plugin-human-title" style="font-size: 11px; opacity: 0.85;">${escapeHtml(s.displayName)}</span>` : ''}
+          </div>
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(s, 'skill')}
           </div>
           <div class="plugin-desc" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-            <div class="resource-tags" style="margin-top: 0;">
-              ${scopeBadge}
-            </div>
-            <div>
-              ${statusBadgeHtml}
-            </div>
-            <div class="plugin-human-title">
-              ${escapeHtml(s.displayName)}
-            </div>
-          </div>
         </div>
         
         <div class="card-right-group">
-          <div class="card-actions">
+          <div class="card-actions-top">
             <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('skill', '${escapeQuotes(s.physicalPath)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -982,11 +2314,6 @@ function renderSkillCard(s, idx) {
                 <line x1="16" y1="13" x2="8" y2="13"></line>
                 <line x1="16" y1="17" x2="8" y2="17"></line>
                 <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-            </button>
-            <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('skill', '${s.id}', ${s.isEnabled}, ${s.isLocal ? 'true' : 'false'}, '${escapeQuotes(s.physicalPath)}')">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
             </button>
             ${s.isPlugin ? `
@@ -997,19 +2324,25 @@ function renderSkillCard(s, idx) {
                   <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
               </button>
-            ` : ''}
+            ` : `
+              <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('skill', '${s.id}', ${s.isEnabled}, ${s.isLocal ? 'true' : 'false'}, '${escapeQuotes(s.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+            `}
           </div>
-          <div class="card-actions-bottom">
+          <div class="card-actions-middle">
             ${s.isBuiltin ? `
-              <span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">${t('protected', 'Protected')}</span>
+              <span class="card-badge-status">${t('badgeBuiltin', 'Built-in')}</span>
             ` : (s.isPlugin ? `
-              <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}" onclick="openPluginDetails('${escapeQuotes(s.pluginId || s.pluginName)}')" style="font-size: 10px; padding: 2px 6px; gap: 3px; display: inline-flex; align-items: center;">🔌 ${escapeHtml(s.pluginDisplayName || s.pluginName || 'Plugin')}</button>
+              <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
             ` : (s.isLocal ? `
-              <span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">Workspace</span>
+              <span class="card-badge-status">Workspace</span>
             ` : `
               <div id="switch-container-${s.id}">
-                <label class="switch">
-                  <input type="checkbox" ${s.isEnabled ? 'checked' : ''} onchange="toggleItem('skill', '${s.id}', this.checked)">
+                <label class="switch" title="${s.source === 'global' && (s.isEnabledForProject || s.projectOverride === 'enabled') ? t('tooltipGlobalToggleProjectWarn', 'Внимание: навык подключен к проекту. Глобальное отключение заблокирует его и в проекте!') : ''}">
+                  <input type="checkbox" ${s.isGloballyEnabled ? 'checked' : ''} onchange="toggleSkillGlobal('${escapeQuotes(s.id)}', this.checked, '${escapeQuotes(s.name || '')}', '${escapeQuotes(s.physicalPath || '')}')">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -1018,8 +2351,15 @@ function renderSkillCard(s, idx) {
               </div>
             `))}
           </div>
-          <div class="card-actions-row3">
+          <div class="card-actions-bottom">
             ${!s.isBuiltin ? `
+              ${s.isPlugin ? `
+                <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('skill', '${s.id}', ${s.isEnabled}, ${s.isLocal ? 'true' : 'false'}, '${escapeQuotes(s.physicalPath)}')">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </button>
+              ` : ''}
               <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveItem('${s.id}', 'skill', '${s.pluginId || ''}', ${s.isEnabled ? 'true' : 'false'}, ${s.isLocal ? 'true' : 'false'}, '${escapeQuotes(s.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="17 8 21 12 17 16"></polyline>
@@ -1038,34 +2378,26 @@ function renderSkillCard(s, idx) {
           </div>
         </div>
       </div>
+      
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadge}
+        </div>
+        ${skillProjectOverrideHtml ? `
+          <div class="card-project-override-row">
+            ${skillProjectOverrideHtml}
+          </div>
+        ` : ''}
+      </div>
     </div>
   `;
 }
 
 function renderWorkflowCard(w, idx) {
   const scopeBadge = getScopeBadgeHtml(w);
-  let statusBadgeHtml = '';
-  if (w.isBuiltin) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-  } else if (w.isPlugin) {
-    if (w.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpPluginActive', 'Active (Plugin enabled)')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('mcpPluginDisabled', 'Disabled (Plugin disabled)')}</span>`;
-    }
-  } else if (w.isLocal) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-  } else {
-    // Global workflow
-    if (w.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('active', 'Active')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('inactive', 'Disabled')}</span>`;
-    }
-  }
 
   return `
-    <div class="glass-card plugin-card">
+    <div class="glass-card plugin-card ${getCardStateClass(w)}">
       <div class="plugin-top">
         <div class="plugin-meta">
           <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;" title="/${w.name}">
@@ -1077,23 +2409,16 @@ function renderWorkflowCard(w, idx) {
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
             </button>
+            <span class="plugin-human-title" style="font-size: 11px; opacity: 0.85;">${escapeHtml(w.displayName)}</span>
+          </div>
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(w, 'workflow')}
           </div>
           <div class="plugin-desc" title="${escapeHtml(w.description)}">${escapeHtml(w.description)}</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-            <div class="resource-tags" style="margin-top: 0;">
-              ${scopeBadge}
-            </div>
-            <div>
-              ${statusBadgeHtml}
-            </div>
-            <div class="plugin-human-title">
-              ${escapeHtml(w.displayName)}
-            </div>
-          </div>
         </div>
         
         <div class="card-right-group">
-          <div class="card-actions">
+          <div class="card-actions-top">
             <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('workflow', '${escapeQuotes(w.physicalPath)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -1101,11 +2426,6 @@ function renderWorkflowCard(w, idx) {
                 <line x1="16" y1="13" x2="8" y2="13"></line>
                 <line x1="16" y1="17" x2="8" y2="17"></line>
                 <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-            </button>
-            <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('workflow', '${w.id}', ${w.isEnabled}, ${w.isLocal ? 'true' : 'false'}, '${escapeQuotes(w.physicalPath)}')">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
             </button>
             ${w.isPlugin ? `
@@ -1116,15 +2436,21 @@ function renderWorkflowCard(w, idx) {
                   <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
               </button>
-            ` : ''}
+            ` : `
+              <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('workflow', '${w.id}', ${w.isEnabled}, ${w.isLocal ? 'true' : 'false'}, '${escapeQuotes(w.physicalPath)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+            `}
           </div>
-          <div class="card-actions-bottom">
+          <div class="card-actions-middle">
             ${w.isBuiltin ? `
-              <span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">${t('protected', 'Protected')}</span>
+              <span class="card-badge-status">${t('protected', 'Protected')}</span>
             ` : (w.isPlugin ? `
-              <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}" onclick="openPluginDetails('${escapeQuotes(w.pluginId || w.pluginName)}')" style="font-size: 10px; padding: 2px 6px; gap: 3px; display: inline-flex; align-items: center;">🔌 ${escapeHtml(w.pluginDisplayName || w.pluginName || 'Plugin')}</button>
+              <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
             ` : (w.isLocal ? `
-              <span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">Workspace</span>
+              <span class="card-badge-status">Workspace</span>
             ` : `
               <div id="switch-container-${w.id}">
                 <label class="switch">
@@ -1137,8 +2463,15 @@ function renderWorkflowCard(w, idx) {
               </div>
             `))}
           </div>
-          <div class="card-actions-row3">
+          <div class="card-actions-bottom">
             ${!w.isBuiltin ? `
+              ${w.isPlugin ? `
+                <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('workflow', '${w.id}', ${w.isEnabled}, ${w.isLocal ? 'true' : 'false'}, '${escapeQuotes(w.physicalPath)}')">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </button>
+              ` : ''}
               <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveItem('${w.id}', 'workflow', '${w.pluginId || ''}', ${w.isEnabled ? 'true' : 'false'}, ${w.isLocal ? 'true' : 'false'}, '${escapeQuotes(w.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="17 8 21 12 17 16"></polyline>
@@ -1157,6 +2490,11 @@ function renderWorkflowCard(w, idx) {
           </div>
         </div>
       </div>
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadge}
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1166,32 +2504,8 @@ function renderMcpCard(m, idx) {
   const cmdArgs = (m.args || []).join(' ');
   const fullCmd = (m.command || '') + (cmdArgs ? ' ' + cmdArgs : '');
 
-  let statusBadgeHtml = '';
-  let controlHtml = '';
-
-  if (m.isBuiltin) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpActive', 'Active')}</span>`;
-    controlHtml = `<span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">${t('protected', 'Protected')}</span>`;
-  } else if (m.isPlugin) {
-    if (m.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpPluginActive', 'Active (Plugin enabled)')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('mcpPluginDisabled', 'Disabled (Plugin disabled)')}</span>`;
-    }
-    controlHtml = `<button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}" onclick="openPluginDetails('${m.pluginId}')" style="font-size: 10px; padding: 2px 6px; gap: 3px; display: inline-flex; align-items: center;">🔌 ${escapeHtml(m.sourceLabel || 'Plugin')}</button>`;
-  } else {
-    const isAct = m.enabled !== false;
-    statusBadgeHtml = `<span style="font-size: 10px; color: ${isAct ? '#34d399' : '#f87171'}; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: ${isAct ? '#34d399' : '#ef4444'}; display: inline-block; box-shadow: 0 0 6px ${isAct ? 'rgba(52,211,153,0.6)' : 'rgba(239,68,68,0.6)'};"></span> ${isAct ? t('mcpActive', 'Active') : t('mcpDisabled', 'Disabled')}</span>`;
-    controlHtml = `
-      <label class="switch">
-        <input type="checkbox" ${isAct ? 'checked' : ''} onchange="toggleMcpServer('${escapeQuotes(m.physicalPath)}', '${escapeQuotes(m.name)}', this.checked)">
-        <span class="slider"></span>
-      </label>
-    `;
-  }
-
   return `
-    <div class="glass-card plugin-card">
+    <div class="glass-card plugin-card ${getCardStateClass(m)}">
       <div class="plugin-top">
         <div class="plugin-meta">
           <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;">
@@ -1204,21 +2518,16 @@ function renderMcpCard(m, idx) {
               </svg>
             </button>
           </div>
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(m, 'mcp')}
+          </div>
           <div class="plugin-desc" style="font-family: monospace; font-size: 11px;" title="${escapeHtml(fullCmd)}">
             ${escapeHtml(fullCmd) || t('noCommand', 'No command specified')}
-          </div>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-            <div class="resource-tags" style="margin-top: 0;">
-              ${scopeBadge}
-            </div>
-            <div>
-              ${statusBadgeHtml}
-            </div>
           </div>
         </div>
         
         <div class="card-right-group">
-          <div class="card-actions">
+          <div class="card-actions-top">
             <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('mcp', '${escapeQuotes(m.physicalPath)}', '${escapeQuotes(m.name)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -1228,11 +2537,29 @@ function renderMcpCard(m, idx) {
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
+            ${m.isPlugin ? `
+              <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(m.sourceLabel || m.pluginId)}" onclick="openPluginDetails('${escapeQuotes(m.pluginId)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+              </button>
+            ` : ''}
+          </div>
+          <div class="card-actions-middle">
+            ${m.isBuiltin ? `
+              <span class="card-badge-status">${t('protected', 'Protected')}</span>
+            ` : (m.isPlugin ? `
+              <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
+            ` : `
+              <label class="switch">
+                <input type="checkbox" ${m.enabled !== false ? 'checked' : ''} onchange="toggleMcpServer('${escapeQuotes(m.physicalPath)}', '${escapeQuotes(m.name)}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            `)}
           </div>
           <div class="card-actions-bottom">
-            ${controlHtml}
-          </div>
-          <div class="card-actions-row3">
             ${!m.isProtected && !m.isPlugin ? `
               <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveMcpServer('${escapeQuotes(m.name)}', '${escapeQuotes(m.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1250,6 +2577,11 @@ function renderMcpCard(m, idx) {
           </div>
         </div>
       </div>
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadge}
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1258,32 +2590,8 @@ function renderHookCard(h, idx) {
   const scopeBadge = getScopeBadgeHtml(h);
   const eventBadge = h.event ? `<span class="slash-cmd" style="font-size: 11px; padding: 2px 6px; font-weight: 700;">${escapeHtml(h.event)}</span>` : '';
 
-  let statusBadgeHtml = '';
-  let controlHtml = '';
-
-  if (h.isProtected) {
-    statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpActive', 'Active')}</span>`;
-    controlHtml = `<span style="font-size: 10px; color: var(--text-muted); opacity: 0.7; padding: 2px 4px;">${t('protected', 'Protected')}</span>`;
-  } else if (h.isPlugin) {
-    if (h.isEnabled) {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; box-shadow: 0 0 6px rgba(52,211,153,0.6);"></span> ${t('mcpPluginActive', 'Active (Plugin enabled)')}</span>`;
-    } else {
-      statusBadgeHtml = `<span style="font-size: 10px; color: #f87171; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: inline-block; box-shadow: 0 0 6px rgba(239,68,68,0.6);"></span> ${t('mcpPluginDisabled', 'Disabled (Plugin disabled)')}</span>`;
-    }
-    controlHtml = `<button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}" onclick="openPluginDetails('${h.pluginId}')" style="font-size: 10px; padding: 2px 6px; gap: 3px; display: inline-flex; align-items: center;">🔌 ${escapeHtml(h.sourceLabel || 'Plugin')}</button>`;
-  } else {
-    const isAct = h.enabled !== false;
-    statusBadgeHtml = `<span style="font-size: 10px; color: ${isAct ? '#34d399' : '#f87171'}; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: ${isAct ? '#34d399' : '#ef4444'}; display: inline-block; box-shadow: 0 0 6px ${isAct ? 'rgba(52,211,153,0.6)' : 'rgba(239,68,68,0.6)'};"></span> ${isAct ? t('mcpActive', 'Active') : t('mcpDisabled', 'Disabled')}</span>`;
-    controlHtml = `
-      <label class="switch">
-        <input type="checkbox" ${isAct ? 'checked' : ''} onchange="toggleHook('${escapeQuotes(h.physicalPath)}', '${escapeQuotes(h.name)}', this.checked)">
-        <span class="slider"></span>
-      </label>
-    `;
-  }
-
   return `
-    <div class="glass-card plugin-card">
+    <div class="glass-card plugin-card ${getCardStateClass(h)}">
       <div class="plugin-top">
         <div class="plugin-meta">
           <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;">
@@ -1291,21 +2599,16 @@ function renderHookCard(h, idx) {
             <span style="font-weight: 600;">${escapeHtml(h.name)}</span>
             ${eventBadge}
           </div>
+          <div class="card-status-subrow">
+            ${getStatusPillHtml(h, 'hook')}
+          </div>
           <div class="plugin-desc" style="font-family: monospace; font-size: 11px;" title="${escapeHtml(h.command || '')}">
             ${escapeHtml(h.command || '') || t('noCommand', 'No command specified')}
-          </div>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px;">
-            <div class="resource-tags" style="margin-top: 0;">
-              ${scopeBadge}
-            </div>
-            <div>
-              ${statusBadgeHtml}
-            </div>
           </div>
         </div>
         
         <div class="card-right-group">
-          <div class="card-actions">
+          <div class="card-actions-top">
             <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('hook', '${escapeQuotes(h.physicalPath)}', '${escapeQuotes(h.name)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -1315,11 +2618,29 @@ function renderHookCard(h, idx) {
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
+            ${h.isPlugin ? `
+              <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(h.sourceLabel || h.pluginId)}" onclick="openPluginDetails('${escapeQuotes(h.pluginId)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+              </button>
+            ` : ''}
+          </div>
+          <div class="card-actions-middle">
+            ${h.isProtected ? `
+              <span class="card-badge-status">${t('protected', 'Protected')}</span>
+            ` : (h.isPlugin ? `
+              <span class="card-badge-status">${t('tabPlugins', 'Plugin')}</span>
+            ` : `
+              <label class="switch">
+                <input type="checkbox" ${h.enabled !== false ? 'checked' : ''} onchange="toggleHook('${escapeQuotes(h.physicalPath)}', '${escapeQuotes(h.name)}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            `)}
           </div>
           <div class="card-actions-bottom">
-            ${controlHtml}
-          </div>
-          <div class="card-actions-row3">
             ${!h.isProtected && !h.isPlugin ? `
               <button class="card-action-btn" title="${t('move', 'Move')}" onclick="moveHook('${escapeQuotes(h.name)}', '${escapeQuotes(h.physicalPath)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1337,55 +2658,36 @@ function renderHookCard(h, idx) {
           </div>
         </div>
       </div>
+      <div class="card-footer-tags">
+        <div class="resource-tags">
+          ${scopeBadge}
+        </div>
+      </div>
     </div>
   `;
 }
 
 const collapsedActiveCategories = window.collapsedActiveCategories || {};
 window.collapsedActiveCategories = collapsedActiveCategories;
-window.toggleActiveCategory = function(key) {
+function toggleActiveCategory(key) {
   collapsedActiveCategories[key] = !collapsedActiveCategories[key];
   renderCurrentTab();
-};
+}
+window.toggleActiveCategory = toggleActiveCategory;
 
 function renderActiveContextView(query) {
-  const activePlugins = pluginsData.filter(p => p.isEnabled);
+  const activePlugins = pluginsData.filter(p => p.isEnabled && (!query || String(p.displayName || p.name || '').toLowerCase().includes(query) || (p.description && String(p.description).toLowerCase().includes(query))));
   const activeRules = rulesData.filter(r => r.isEnabled !== false && (!query || String(r.displayName || r.name || '').toLowerCase().includes(query) || (r.description && String(r.description).toLowerCase().includes(query))));
   const activeSkills = skillsData.filter(s => s.isEnabled !== false && (!query || String(s.displayName || s.name || '').toLowerCase().includes(query) || (s.description && String(s.description).toLowerCase().includes(query))));
   const activeWorkflows = workflowsData.filter(w => w.isEnabled !== false && (!query || String(w.displayName || w.name || '').toLowerCase().includes(query) || (w.description && String(w.description).toLowerCase().includes(query))));
   const activeMcp = mcpData.filter(m => m.isEnabled && (!query || String(m.name || '').toLowerCase().includes(query) || String(m.command || '').toLowerCase().includes(query)));
   const activeHooks = hooksData.filter(h => h.isEnabled && (!query || String(h.name || '').toLowerCase().includes(query) || String(h.command || '').toLowerCase().includes(query) || String(h.event || '').toLowerCase().includes(query)));
 
-  const totalActiveCount = activeRules.length + activeSkills.length + activeWorkflows.length + activeMcp.length + activeHooks.length;
+  const totalActiveCount = activePlugins.length + activeRules.length + activeSkills.length + activeWorkflows.length + activeMcp.length + activeHooks.length;
 
-  let summaryText = t('activeContextSummary', 'Active AI Context: {rules} rules • {skills} skills • {plugins} plugins • {workflows} workflows • {mcp} MCP • {hooks} hooks')
-    .replace('{rules}', activeRules.length)
-    .replace('{skills}', activeSkills.length)
-    .replace('{plugins}', activePlugins.length)
-    .replace('{workflows}', activeWorkflows.length)
-    .replace('{mcp}', activeMcp.length)
-    .replace('{hooks}', activeHooks.length);
+  let html = '';
 
-  let html = `
-    <div class="active-plugins-bar">
-      <div class="active-plugins-bar-header">
-        <span>🔌 ${t('activePluginsBar', 'Enabled Plugins')} (${activePlugins.length})</span>
-        <span style="font-size: 10px; text-transform: none; color: var(--text-muted); font-weight: normal;">${escapeHtml(summaryText)}</span>
-      </div>
-      <div class="active-plugins-chips">
-        ${activePlugins.length > 0 ? activePlugins.map(p => `
-          <div class="plugin-chip" title="${escapeHtml(p.description || p.displayName)}">
-            <span class="plugin-chip-name" onclick="openPluginDetails('${p.id}')">🔌 ${escapeHtml(p.displayName)} <span style="opacity: 0.6; font-size: 10px;">v${p.version}</span></span>
-            <button class="plugin-chip-toggle" title="${t('disabled', 'Disable')}" onclick="toggleItem('plugin', '${p.id}', false)">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-        `).join('') : `<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">${t('noActivePlugins', 'No plugins currently enabled')}</span>`}
-      </div>
-    </div>
-  `;
-
-  if (totalActiveCount === 0 && activePlugins.length === 0) {
+  if (totalActiveCount === 0) {
     html += `<div class="no-data" style="margin-top: 20px;">${t('noActiveRules', 'No active resources found.')}</div>`;
     pluginListContainer.innerHTML = html;
     return;
@@ -1426,8 +2728,8 @@ function renderActiveContextView(query) {
 
     if (isGroupingEnabled) {
       const groups = [];
-      if (global.length > 0) groups.push({ title: t('groupGlobal', 'Global'), icon: '🌐', items: global });
       if (local.length > 0) groups.push({ title: t('groupWorkspace', 'Workspace / Local'), icon: '📁', items: local });
+      if (global.length > 0) groups.push({ title: t('groupGlobal', 'Global'), icon: '🌐', items: global });
       if (builtin.length > 0) groups.push({ title: t('groupBuiltin', 'Built-in'), icon: '🔷', items: builtin });
       if (plugins.length > 0) groups.push({ title: t('groupPlugins', 'From Plugins'), icon: '🔌', items: plugins });
 
@@ -1443,8 +2745,8 @@ function renderActiveContextView(query) {
         }
       }
     } else {
-      // Without intermediate tier headers (smooth compact flow)
-      const allSorted = [...global, ...local, ...builtin, ...plugins];
+      // Without intermediate tier headers (smooth compact flow): Local first, then Global, Builtin, Plugins
+      const allSorted = [...local, ...global, ...builtin, ...plugins];
       for (const item of allSorted) {
         secHtml += cardFn(item, globalIndex++);
       }
@@ -1454,6 +2756,7 @@ function renderActiveContextView(query) {
     return secHtml;
   };
 
+  html += renderSection('plugins', '🔌', t('activeSectionPlugins', 'Active Plugins'), activePlugins, renderPluginCard);
   html += renderSection('rules', '📜', t('activeSectionRules', 'Active Rules'), activeRules, renderRuleCard);
   html += renderSection('skills', '⚡', t('activeSectionSkills', 'Active Skills'), activeSkills, renderSkillCard);
   html += renderSection('workflows', '📋', t('activeSectionWorkflows', 'Active Workflows'), activeWorkflows, renderWorkflowCard);
@@ -1469,8 +2772,38 @@ function renderCurrentTab() {
     return;
   }
 
-  document.getElementById('main-view').style.display = 'block';
-  document.getElementById('detail-view').style.display = 'none';
+  const mainViewTop = document.getElementById('main-view-top');
+  const mainNav = document.getElementById('main-nav-controls');
+  const detailNav = document.getElementById('detail-nav-controls');
+  const mainView = document.getElementById('main-view');
+  const detailView = document.getElementById('detail-view');
+
+  if (mainViewTop) {
+    mainViewTop.style.display = currentTab === 'active' ? 'block' : 'none';
+  }
+  const configBody = document.getElementById('config-repos-body');
+  const configChevron = document.getElementById('config-repos-chevron');
+  if (configBody) configBody.classList.toggle('collapsed', !!isConfigReposCollapsed);
+  if (configChevron) configChevron.classList.toggle('collapsed', !!isConfigReposCollapsed);
+
+  if (mainNav) mainNav.style.display = 'block';
+  if (detailNav) detailNav.style.display = 'none';
+  if (mainView) mainView.style.display = 'block';
+  if (detailView) detailView.style.display = 'none';
+
+  // Restore navigation header elements for main tab view
+  const backBtn = document.getElementById('nav-btn-back');
+  if (backBtn) backBtn.style.display = 'none';
+
+  const btnGrouping = document.getElementById('btn-toggle-grouping');
+  if (btnGrouping) btnGrouping.style.display = 'inline-flex';
+
+  const btnCreateLabel = document.getElementById('btn-create-label');
+  if (btnCreateLabel) btnCreateLabel.textContent = t('btnCreateNew', 'Create New');
+
+  if (searchInput) {
+    searchInput.placeholder = t('searchPlaceholder', 'Search by name or description...');
+  }
 
   const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
 
@@ -1502,111 +2835,7 @@ function renderCurrentTab() {
       (p.description && String(p.description).toLowerCase().includes(query))
     );
 
-    renderGroupedGrid(filtered, (p, idx) => {
-      const skillsCount = p.skillsCount !== undefined ? p.skillsCount : (p.skills ? p.skills.length : 0);
-      const rulesCount = p.rulesCount !== undefined ? p.rulesCount : (p.rules ? p.rules.length : 0);
-      const hooksCount = p.hooksCount !== undefined ? p.hooksCount : (p.hooks ? p.hooks.length : 0);
-      const hasSkills = skillsCount > 0;
-      const hasRules = rulesCount > 0;
-      const hasHooks = hooksCount > 0;
-      
-      return `
-        <div class="glass-card plugin-card">
-          <div class="plugin-top">
-            <div class="plugin-meta">
-              <div class="plugin-name clickable" title="${escapeHtml(p.displayName)}" onclick="openPluginDetails('${p.id}')">
-                <span class="card-index-num">#${idx}</span>
-                ${escapeHtml(p.displayName)}
-              </div>
-              
-              <div class="plugin-desc" id="desc-${p.id}" title="${escapeHtml(p.description)}">
-                ${escapeHtml(p.description) || t('noDescription', 'No description.')}
-              </div>
-
-              <div class="plugin-details">
-                <span>v${p.version}</span>
-                ${p.author ? `<span>•</span> <span>${escapeHtml(p.author)}</span>` : ''}
-              </div>
-            </div>
-            
-            <div class="card-right-group">
-              <div class="card-actions-bottom">
-                ${p.isLocal ? '' : `
-                  <div id="switch-container-${p.id}">
-                    <label class="switch">
-                      <input type="checkbox" ${p.isEnabled ? 'checked' : ''} onchange="toggleItem('plugin', '${p.id}', this.checked)">
-                      <span class="slider"></span>
-                    </label>
-                  </div>
-                  <div id="loader-${p.id}" style="display: none; padding-right: 6px;">
-                    <div class="spinner-small"></div>
-                  </div>
-                `}
-              </div>
-              <div class="card-actions">
-                <button class="card-action-btn" title="${t('openFolder', 'Open Folder')}" onclick="openItemFolder('plugin', '${p.id}', ${p.isEnabled}, ${p.isLocal ? 'true' : 'false'}, '${escapeQuotes(p.physicalPath)}')">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                  </svg>
-                </button>
-                <button class="card-action-btn" title="${t('deleteBtn', 'Delete')}" onclick="deleteItem('plugin', '${p.id}', '${escapeQuotes(p.displayName)}', '${escapeQuotes(p.physicalPath)}')">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                </button>
-              </div>
-              <div class="card-actions-row3">
-                <button class="card-action-btn plugin-move-btn" title="${t('move', 'Move')}" onclick="moveItem('${p.id}', 'plugin', null, ${p.isEnabled}, ${p.isLocal ? 'true' : 'false'}, '${escapeQuotes(p.physicalPath)}')">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="17 8 21 12 17 16"></polyline>
-                    <line x1="3" y1="12" x2="21" y2="12"></line>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-          
-          <div class="resource-tags">
-            ${p.isLocal ? `
-              <div class="res-tag active res-local" style="font-size: 11px;">
-                <span class="res-indicator"></span>
-                <span>${t('badgeLocal', 'Local')} • ${escapeHtml(p.workspaceName)}</span>
-              </div>
-            ` : `
-              <div class="res-tag active res-global" style="font-size: 11px;">
-                <span class="res-indicator"></span>
-                <span>${t('badgeGlobal', 'Global')}</span>
-              </div>
-            `}
-            ${hasSkills ? `
-              <div class="res-tag active">
-                <span class="res-indicator"></span>
-                <span>${skillsCount} ${t('skillsCount', 'Skills')}</span>
-              </div>
-            ` : ''}
-            ${hasRules ? `
-              <div class="res-tag active">
-                <span class="res-indicator"></span>
-                <span>${rulesCount} ${t('rulesCount', 'Rules')}</span>
-              </div>
-            ` : ''}
-            ${hasHooks ? `
-              <div class="res-tag active res-hooks">
-                <span class="res-indicator"></span>
-                <span>${hooksCount} ${t('hooks', 'Hooks')}</span>
-              </div>
-            ` : ''}
-            ${p.hasMcp ? `
-              <div class="res-tag active res-mcp">
-                <span class="res-indicator"></span>
-                <span>MCP</span>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-      `;
-    }, 'noPlugins', 'No plugins found.');
+    renderGroupedGrid(filtered, renderPluginCard, 'noPlugins', 'No plugins found.');
 
   } else if (currentTab === 'workflows') {
     const filtered = workflowsData.filter(w => 
@@ -1677,7 +2906,7 @@ function renderConflicts() {
   }).join('');
 }
 
-window.resolveConflict = function(id, category, resolution, activePath, storagePath, isDir) {
+function resolveConflict(id, category, resolution, activePath, storagePath, isDir) {
   vscode.postMessage({
     command: 'resolveConflict',
     id: id,
@@ -1687,10 +2916,10 @@ window.resolveConflict = function(id, category, resolution, activePath, storageP
     storagePath: decodeURIComponent(storagePath),
     isDir: isDir
   });
-};
+}
+window.resolveConflict = resolveConflict;
 
-let isDetailedView = false;
-window.toggleViewMode = function() {
+function toggleViewMode() {
   isDetailedView = !isDetailedView;
   const listContainer = document.getElementById('plugin-list-container');
   const detailContainer = document.getElementById('detail-view');
@@ -1704,10 +2933,10 @@ window.toggleViewMode = function() {
     detailContainer?.classList.remove('detailed-mode');
     if (btnText) btnText.textContent = t('detailed', 'Detailed');
   }
-};
+}
+window.toggleViewMode = toggleViewMode;
 
-let isSingleColumn = false;
-window.toggleLayoutMode = function() {
+function toggleLayoutMode() {
   isSingleColumn = !isSingleColumn;
   const listContainer = document.getElementById('plugin-list-container');
   const btnText = document.getElementById('layout-mode-text');
@@ -1721,20 +2950,20 @@ window.toggleLayoutMode = function() {
     if (btnText) btnText.textContent = t('oneColumn', '1 Column');
     if (btnIcon) btnIcon.innerHTML = '<rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="18" rx="1"></rect>';
   }
-};
+}
+window.toggleLayoutMode = toggleLayoutMode;
 
-let isGroupingEnabled = false;
-window.toggleGroupingMode = function() {
+function toggleGroupingMode() {
   isGroupingEnabled = !isGroupingEnabled;
   const btnText = document.getElementById('grouping-mode-text');
   if (btnText) {
     btnText.textContent = isGroupingEnabled ? t('groupingOn', 'Grouping: On') : t('groupingOff', 'Grouping: Off');
   }
   renderCurrentTab();
-};
+}
+window.toggleGroupingMode = toggleGroupingMode;
 
-let isDetailDetailedView = false;
-window.toggleDetailViewMode = function() {
+function toggleDetailViewMode() {
   isDetailDetailedView = !isDetailDetailedView;
   const listContainer = document.getElementById('detail-skills-list');
   const btnText = document.getElementById('detail-view-mode-text');
@@ -1745,10 +2974,10 @@ window.toggleDetailViewMode = function() {
     listContainer?.classList.remove('detailed-mode');
     if (btnText) btnText.textContent = t('detailed', 'Detailed');
   }
-};
+}
+window.toggleDetailViewMode = toggleDetailViewMode;
 
-let isDetailSingleColumn = false;
-window.toggleDetailLayoutMode = function() {
+function toggleDetailLayoutMode() {
   isDetailSingleColumn = !isDetailSingleColumn;
   const listContainer = document.getElementById('detail-skills-list');
   const btnText = document.getElementById('detail-layout-mode-text');
@@ -1762,7 +2991,8 @@ window.toggleDetailLayoutMode = function() {
     if (btnText) btnText.textContent = t('oneColumn', '1 Column');
     if (btnIcon) btnIcon.innerHTML = '<rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="18" rx="1"></rect>';
   }
-};
+}
+window.toggleDetailLayoutMode = toggleDetailLayoutMode;
 
 const createModal = document.getElementById('create-modal');
 const createCategorySelect = document.getElementById('create-category');
@@ -1775,7 +3005,11 @@ const lblNameField = document.getElementById('lbl-name-field');
 const createErrorMsg = document.getElementById('create-error-msg');
 
 document.getElementById('btn-open-create-modal')?.addEventListener('click', () => {
-  openCreateModal();
+  if (activePluginId) {
+    openCreateModal('skill', 'plugin', activePluginId);
+  } else {
+    openCreateModal();
+  }
 });
 
 document.getElementById('btn-cancel-create')?.addEventListener('click', () => {
@@ -1790,7 +3024,7 @@ createCategorySelect?.addEventListener('change', () => {
   handleCategoryChange();
 });
 
-window.openCreateModal = function(presetCategory = null, presetTargetType = null, presetTargetId = null) {
+function openCreateModal(presetCategory = null, presetTargetType = null, presetTargetId = null) {
   if (createErrorMsg) {
     createErrorMsg.style.display = 'none';
     createErrorMsg.textContent = '';
@@ -1807,17 +3041,24 @@ window.openCreateModal = function(presetCategory = null, presetTargetType = null
   const authEl = document.getElementById('create-author');
   if (authEl) authEl.value = '';
   
-  document.getElementById('create-scripts').checked = false;
-  document.getElementById('create-examples').checked = false;
-  document.getElementById('create-docs').checked = false;
-  document.getElementById('create-resources').checked = false;
+  const scEl = document.getElementById('create-scripts');
+  if (scEl) scEl.checked = false;
+  const exEl = document.getElementById('create-examples');
+  if (exEl) exEl.checked = false;
+  const docEl = document.getElementById('create-docs');
+  if (docEl) docEl.checked = false;
+  const resEl = document.getElementById('create-resources');
+  if (resEl) resEl.checked = false;
   
-  let defaultCat = presetCategory;
-  if (!defaultCat) {
+  let defaultCat = 'plugin';
+  if (presetCategory) {
+    defaultCat = presetCategory;
+  } else if (currentTab === 'skills') {
+    defaultCat = 'skill';
+  } else if (currentTab === 'workflows') {
+    defaultCat = 'workflow';
+  } else if (currentTab === 'rules') {
     defaultCat = 'rule';
-    if (currentTab === 'skills') defaultCat = 'skill';
-    else if (currentTab === 'plugins') defaultCat = 'plugin';
-    else if (currentTab === 'workflows') defaultCat = 'workflow';
   }
   createCategorySelect.value = defaultCat;
   
@@ -1838,7 +3079,8 @@ window.openCreateModal = function(presetCategory = null, presetTargetType = null
   }
   
   if (createModal) createModal.style.display = 'flex';
-};
+}
+window.openCreateModal = openCreateModal;
 
 function closeCreateModal() {
   if (createModal) createModal.style.display = 'none';
@@ -1939,6 +3181,7 @@ function submitCreate() {
     return;
   }
 
+  setSyncingState(2100);
   vscode.postMessage({
     command: 'createItem',
     category,
@@ -1969,4 +3212,143 @@ function showCreateError(msg) {
 setTimeout(() => {
   document.body.classList.remove('loading');
 }, 800);
+
+function updateToolbarBadge() {
+  const badge = document.getElementById('update-count-badge');
+  if (!badge) return;
+  const count = updatesData && typeof updatesData.updatesCount === 'number' ? updatesData.updatesCount : 0;
+  if (count > 0) {
+    badge.textContent = String(count);
+    badge.style.display = 'inline-block';
+  } else {
+    badge.textContent = '';
+    badge.style.display = 'none';
+  }
+}
+
+function triggerCheckUpdates(btnEl) {
+  const icons = document.querySelectorAll('.update-icon');
+  icons.forEach(i => i.classList.add('rotating'));
+  const chkBtnText = document.getElementById('btn-check-updates-text');
+  if (chkBtnText) chkBtnText.textContent = t('checkingUpdates', 'Checking...');
+  vscode.postMessage({ command: 'checkUpdates' });
+}
+
+function openPluginUpdateModal(pluginId, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const modal = document.getElementById('plugin-update-modal');
+  if (!modal) return;
+  
+  const p = (pluginsData || []).find(x => x.id === pluginId || x.rawId === pluginId || x.name === pluginId);
+  if (!p) {
+    console.warn(`Plugin with id ${pluginId} not found in pluginsData`);
+    return;
+  }
+  targetUpdatePlugin = p;
+  
+  const uInfo = updatesData && updatesData.updates ? (updatesData.updates[pluginId] || (p && updatesData.updates[p.id]) || (p && updatesData.updates[p.name])) : null;
+  const currentVer = p.version || '1.0.0';
+  const newVer = uInfo && uInfo.remoteVersion ? uInfo.remoteVersion : currentVer;
+  const repoUrl = uInfo && uInfo.repoUrl ? uInfo.repoUrl : (p.repository || '');
+  const isGit = !!(uInfo && uInfo.hasGitDir);
+  
+  const titleEl = document.getElementById('update-modal-title');
+  if (titleEl) titleEl.textContent = `${t('updateModalTitle', 'Update Plugin')}: ${p.displayName || p.name || p.id}`;
+  
+  const subEl = document.getElementById('update-modal-subtitle');
+  if (subEl) subEl.textContent = p.physicalPath || '';
+  
+  const bodyEl = document.getElementById('plugin-update-body');
+  if (bodyEl) {
+    const methodText = isGit 
+      ? t('updateMethodGitPull', 'Git Pull (native)') 
+      : t('updateMethodGitClone', 'Git Clone & Replace (creates .git)');
+
+    bodyEl.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid var(--border-glass); border-radius: 8px; padding: 10px 14px;">
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted);">${t('currentVersion', 'Current')}</div>
+          <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;">v${escapeHtml(currentVer)}</div>
+        </div>
+        <div style="font-size: 18px; color: var(--text-muted);">➔</div>
+        <div>
+          <div style="font-size: 11px; color: var(--text-muted);">${t('newVersion', 'New Version')}</div>
+          <div style="font-size: 14px; font-weight: 700; color: #34d399;">v${escapeHtml(newVer)}</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-glass); border-radius: 8px; padding: 10px 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--text-muted); font-size: 11px;">${t('repoUrl', 'Repository')}:</span>
+          ${repoUrl ? `<a href="${escapeQuotes(repoUrl)}" target="_blank" style="color: #60a5fa; text-decoration: none; font-size: 11px;">${escapeHtml(repoUrl.replace('https://github.com/', ''))} ↗</a>` : `<span style="font-size: 11px; color: var(--text-muted);">—</span>`}
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--text-muted); font-size: 11px;">${t('updateMethod', 'Update method')}:</span>
+          <span style="font-size: 11px; font-family: var(--font-mono, monospace); color: ${isGit ? '#34d399' : '#60a5fa'};">
+            ${escapeHtml(methodText)}
+          </span>
+        </div>
+      </div>
+
+      <div id="plugin-update-log-box" style="display: none; background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px; font-family: var(--font-mono, monospace); font-size: 11px; max-height: 140px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4; color: #94a3b8;"></div>
+    `;
+  }
+  
+  const btnConfirm = document.getElementById('btn-confirm-update');
+  if (btnConfirm) {
+    const confirmLabel = t('btnConfirmUpdate', 'Update to v{version}').replace('{version}', newVer);
+    btnConfirm.textContent = confirmLabel;
+    btnConfirm.style.background = '#2563eb';
+    btnConfirm.disabled = false;
+  }
+  const btnCancel = document.getElementById('btn-cancel-update');
+  if (btnCancel) btnCancel.disabled = false;
+
+  modal.style.display = 'flex';
+}
+
+function closePluginUpdateModal() {
+  const modal = document.getElementById('plugin-update-modal');
+  if (modal) modal.style.display = 'none';
+  targetUpdatePlugin = null;
+}
+
+function appendUpdateLog(msg) {
+  const logBox = document.getElementById('plugin-update-log-box');
+  if (logBox) {
+    logBox.style.display = 'block';
+    const entry = document.createElement('div');
+    entry.textContent = msg;
+    logBox.appendChild(entry);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+}
+
+function executePluginUpdate() {
+  if (!targetUpdatePlugin) return;
+  const btnConfirm = document.getElementById('btn-confirm-update');
+  if (btnConfirm) {
+    btnConfirm.disabled = true;
+    btnConfirm.textContent = t('updatingPlugin', 'Updating...');
+  }
+  const btnCancel = document.getElementById('btn-cancel-update');
+  if (btnCancel) btnCancel.disabled = true;
+
+  appendUpdateLog(`Starting update for ${targetUpdatePlugin.id}...`);
+  vscode.postMessage({
+    command: 'updatePlugin',
+    pluginId: targetUpdatePlugin.id,
+    physicalPath: targetUpdatePlugin.physicalPath
+  });
+}
+
+window.triggerCheckUpdates = triggerCheckUpdates;
+window.openPluginUpdateModal = openPluginUpdateModal;
+window.closePluginUpdateModal = closePluginUpdateModal;
+window.executePluginUpdate = executePluginUpdate;
+window.appendUpdateLog = appendUpdateLog;
+window.updateToolbarBadge = updateToolbarBadge;
 

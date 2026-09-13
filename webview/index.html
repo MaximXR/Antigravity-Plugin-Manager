@@ -8,36 +8,245 @@
 </head>
 <body class="loading">
   <div class="container">
-    <!-- Main view wrapper -->
-    <div id="main-view">
-      <header style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-        <div style="flex: 1; min-width: 0;">
-          <h1>{{title}}</h1>
-          <p class="subtitle">{{subtitle}}</p>
+    <!-- Unified Permanent Sticky Navigation Header (ALWAYS AT TOP: 0) -->
+    <div class="sticky-nav-header" id="sticky-nav-header">
+      <!-- Row 1: Tab Selection Row with Language Selector -->
+      <div class="tabs-row">
+        <div class="tabs-left-group">
+          <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">
+            <span>⚡ {{tabActive}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionActiveEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">
+            <span>{{tabRules}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionRulesEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-skills" onclick="switchTab('skills')">
+            <span>{{tabSkills}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionSkillsEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-plugins" onclick="switchTab('plugins')">
+            <span>{{tabPlugins}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionPluginsEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-workflows" onclick="switchTab('workflows')">
+            <span>{{tabWorkflows}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionWorkflowsEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-mcp" onclick="switchTab('mcp')">
+            <span>{{tabMcp}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionMcpEsc}}">?</span>
+          </button>
+          <button class="tab-btn" id="tab-btn-hooks" onclick="switchTab('hooks')">
+            <span>{{tabHooks}}</span>
+            <span class="tab-help-icon" data-tooltip="{{captionHooksEsc}}">?</span>
+          </button>
         </div>
-        <div class="lang-selector-container" style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; margin-top: 2px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;">
+        <div class="lang-selector-container" style="flex-shrink: 0; display: flex; align-items: center; gap: 6px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="2" y1="12" x2="22" y2="12"></line>
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
           </svg>
-          <select id="lang-select" style="background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 11px; padding: 4px 8px 4px 6px; border-radius: 6px; outline: none; cursor: pointer; transition: border-color 0.2s;">
+          <select id="lang-select" style="background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 11px; padding: 3px 6px; border-radius: 6px; outline: none; cursor: pointer;">
             <option value="auto" {{configLangAuto}}>Auto</option>
             <option value="en" {{configLangEn}}>English</option>
             <option value="ru" {{configLangRu}}>Русский</option>
           </select>
         </div>
+      </div>
+
+      <!-- Sync Status Strip (Dedicated notification bar above controls) -->
+      <div class="sync-status-strip" id="sync-status-strip" style="display: none;">
+        <div class="sync-status-badge" id="sync-status-badge" style="display: none;" title="{{syncTooltip}}">
+          <span class="sync-dot"></span>
+          <span class="sync-text" id="sync-status-text"></span>
+          <button class="btn-sync-soft-apply" id="btn-sync-soft-apply" style="display: none;" onclick="triggerSoftApply(event)" title="{{softApplyTitle}}">
+            ⚡ {{softApplyBtn}}
+          </button>
+          <button class="btn-sync-inspect" id="btn-sync-inspect" onclick="openLiveContextModal(event)" title="{{liveContextTitle}}">
+            👁
+          </button>
+        </div>
+      </div>
+
+      <!-- Row 2: Unified Controls Row (Title on Left, Actions on Right) -->
+      <div class="nav-controls-row">
+        <div class="nav-controls-left">
+          <button class="btn btn-secondary back-btn" id="nav-btn-back" style="display: none;" onclick="closePluginDetails()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>{{back}}</span>
+          </button>
+          <div class="list-title" id="list-section-title">⚡ {{tabActive}}</div>
+        </div>
+
+        <div class="list-section-controls">
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-layout" onclick="toggleLayoutMode()" title="{{layoutModeText}}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="18" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="18" rx="1"></rect>
+            </svg>
+            <span id="layout-mode-text">{{layoutModeText}}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-view" onclick="toggleViewMode()" title="{{viewModeText}}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"></line>
+              <line x1="8" y1="12" x2="21" y2="12"></line>
+              <line x1="8" y1="18" x2="21" y2="18"></line>
+              <line x1="3" y1="6" x2="3.01" y2="6"></line>
+              <line x1="3" y1="12" x2="3.01" y2="12"></line>
+              <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </svg>
+            <span id="view-mode-text">{{viewModeText}}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-grouping" onclick="toggleGroupingMode()" title="{{groupingModeText}}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              <line x1="3" y1="9" x2="21" y2="9"></line>
+              <line x1="9" y1="21" x2="9" y2="9"></line>
+            </svg>
+            <span id="grouping-mode-text">{{groupingModeText}}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-soft-apply-toolbar" title="{{softApplyTitle}}" onclick="triggerSoftApply(event)">
+            <span style="font-size: 12px; color: #fbbf24;">⚡</span>
+            <span>{{softApplyBtn}}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-refresh" title="{{refreshBtn}}" onclick="triggerRefresh(this)">
+            <svg class="refresh-spin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6"></path>
+              <path d="M1 20v-6h6"></path>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            <span>{{refreshBtn}}</span>
+          </button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" id="btn-check-updates" title="{{checkUpdates}}" onclick="triggerCheckUpdates(this)">
+            <span class="update-icon" style="font-size: 11px;">🚀</span>
+            <span id="btn-check-updates-text">{{checkUpdates}}</span>
+            <span class="update-count-badge" id="update-count-badge" style="display: none; background: #3b82f6; color: white; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 10px; margin-left: 2px;"></span>
+          </button>
+          <button class="btn btn-secondary" id="btn-detail-refresh" style="display: none;" onclick="triggerRefresh(this)">
+            <span>{{refreshBtn}}</span>
+          </button>
+          <button class="btn" id="btn-open-create-modal" style="padding: 5px 10px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; height: 26px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span id="btn-create-label">{{btnCreateNew}}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Row 3: Unified Search Box -->
+      <div class="nav-search-row">
+        <input type="text" class="search-box" id="search-input" placeholder="{{searchPlaceholder}}">
+      </div>
+    </div>
+
+    <!-- Main view top section (header, storage, stats, conflicts) -->
+    <div id="main-view-top">
+      <header style="display: none;">
+        <h1>{{title}}</h1>
+        <p class="subtitle">{{subtitle}}</p>
       </header>
 
-      <div class="glass-card storage-section">
-        <div class="storage-title">{{storagePathLabel}}</div>
-        <div class="storage-row">
-          <div class="storage-path" id="storage-path-display">...</div>
-          <button class="btn" id="btn-select-storage">{{changeStorageBtn}}</button>
+      <div class="glass-card config-repos-section" id="config-repos-section">
+        <div class="config-repos-main-header" onclick="toggleConfigReposSection()" style="cursor: pointer; user-select: none;" title="{{toggleCategory}}">
+          <div class="storage-title" style="margin-bottom: 0; display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span>📁</span>
+              <span>{{repositoriesAndConfigs}}</span>
+            </div>
+            <span class="active-category-chevron" id="config-repos-chevron">▼</span>
+          </div>
         </div>
-        <div class="explorer-buttons">
-          <button class="btn btn-secondary" style="flex: 1;" id="btn-open-active">{{openActiveFolderBtn}}</button>
-          <button class="btn btn-secondary" style="flex: 1;" id="btn-open-storage">{{openStorageFolderBtn}}</button>
+
+        <div id="config-repos-body">
+          <!-- Global Scope Block -->
+          <div class="config-scope-block">
+          <div class="config-scope-header">
+            <div class="config-scope-title">
+              <span class="config-scope-badge config-badge-global">🌐</span>
+              <span>{{storageScopeGlobal}}</span>
+            </div>
+            <div class="config-scope-actions">
+              <button class="btn btn-connect-action" id="btn-connect-plugins-global" title="{{btnConnectPluginsGlobal}}">
+                <span>+ 🔌 {{btnConnectPluginsGlobal}}</span>
+              </button>
+              <button class="btn btn-connect-action" id="btn-connect-skills-global" title="{{btnConnectSkillsGlobal}}">
+                <span>+ ⚡ {{btnConnectSkillsGlobal}}</span>
+              </button>
+            </div>
+          </div>
+          <div class="config-subrows">
+            <div class="config-subrow">
+              <span class="config-subrow-label">{{lblConfigs}}</span>
+              <div class="config-subrow-buttons">
+                <button class="btn btn-secondary btn-chip" id="btn-open-config-json" title="Antigravity native configuration (~/.gemini/config/config.json)">⚙️ {{openConfigJson}}</button>
+                <button class="btn btn-secondary btn-chip" id="btn-open-plugins-json" title="Plugins repositories (~/.gemini/config/plugins.json)">🔌 {{openPluginsJson}}</button>
+                <button class="btn btn-secondary btn-chip" id="btn-open-skills-json" title="Skills repositories (~/.gemini/config/skills.json)">⚡ {{openSkillsJson}}</button>
+              </div>
+            </div>
+            <div class="config-subrow">
+              <span class="config-subrow-label">{{lblFolders}}</span>
+              <div class="config-subrow-buttons">
+                <button class="btn btn-secondary btn-chip" id="btn-open-active" title="~/.gemini/config/plugins">📁 {{openPluginsFolderBtn}}</button>
+                <button class="btn btn-secondary btn-chip" id="btn-open-skills-folder" title="~/.gemini/config/skills">📁 {{openSkillsFolderBtn}}</button>
+              </div>
+            </div>
+          </div>
+          <!-- Global Connected External Repositories -->
+          <div id="connected-repos-global-container" class="connected-repos-container" style="display: none;">
+            <div class="connected-repos-title">{{connectedRepositories}}</div>
+            <div id="connected-repos-global-chips" class="connected-repos-chips"></div>
+          </div>
+        </div>
+
+        <!-- Project Workspace Scope Block -->
+        <div class="config-scope-block" id="workspace-scope-block" style="display: none;">
+          <div class="config-scope-header">
+            <div class="config-scope-title">
+              <span class="config-scope-badge config-badge-workspace">📁</span>
+              <span id="workspace-scope-title-label">{{storageScopeWorkspace}}</span>
+              <select id="workspace-selector-select" class="workspace-scope-select" style="display: none;"></select>
+              <span class="tab-help-icon" id="workspace-scope-help" style="cursor: help; display: none;" title="В мульти-проектах Antigravity IDE по умолчанию считывает контекст из первой (верхней) основной папки.">?</span>
+            </div>
+            <div class="config-scope-actions">
+              <button class="btn btn-connect-action" id="btn-connect-plugins-project" title="{{btnConnectPluginsProject}}">
+                <span>+ 🔌 {{btnConnectPluginsProject}}</span>
+              </button>
+              <button class="btn btn-connect-action" id="btn-connect-skills-project" title="{{btnConnectSkillsProject}}">
+                <span>+ ⚡ {{btnConnectSkillsProject}}</span>
+              </button>
+            </div>
+          </div>
+          <div class="config-subrows">
+            <div class="config-subrow">
+              <span class="config-subrow-label">{{lblConfigs}}</span>
+              <div class="config-subrow-buttons">
+                <button class="btn btn-secondary btn-chip" id="btn-open-project-plugins-json" title="Workspace plugins repositories (.agents/plugins.json)">🔌 {{openPluginsJson}}</button>
+                <button class="btn btn-secondary btn-chip" id="btn-open-project-skills-json" title="Workspace skills repositories (.agents/skills.json)">⚡ {{openSkillsJson}}</button>
+              </div>
+            </div>
+            <div class="config-subrow">
+              <span class="config-subrow-label">{{lblFolders}}</span>
+              <div class="config-subrow-buttons">
+                <button class="btn btn-secondary btn-chip" id="btn-open-project-agents-folder" title="Workspace .agents folder">📁 {{openAgentsFolderBtn}}</button>
+              </div>
+            </div>
+          </div>
+          <div id="workspace-multi-hint" class="workspace-multi-hint" style="display: none;">
+            💡 Antigravity IDE по умолчанию использует первую (верхнюю) папку как основную. Настройки будут применены к выбранному проекту.
+          </div>
+          <!-- Workspace Connected External Repositories -->
+          <div id="connected-repos-workspace-container" class="connected-repos-container" style="display: none;">
+            <div class="connected-repos-title">{{connectedRepositories}}</div>
+            <div id="connected-repos-workspace-chips" class="connected-repos-chips"></div>
+          </div>
+        </div>
         </div>
       </div>
 
@@ -81,88 +290,10 @@
         </div>
         <div id="conflict-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
       </div>
+    </div>
 
-      <!-- Tab Selection Row -->
-      <div class="tabs-row">
-        <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">
-          <span>⚡ {{tabActive}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionActiveEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">
-          <span>{{tabRules}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionRulesEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-skills" onclick="switchTab('skills')">
-          <span>{{tabSkills}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionSkillsEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-plugins" onclick="switchTab('plugins')">
-          <span>{{tabPlugins}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionPluginsEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-workflows" onclick="switchTab('workflows')">
-          <span>{{tabWorkflows}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionWorkflowsEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-mcp" onclick="switchTab('mcp')">
-          <span>{{tabMcp}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionMcpEsc}}">?</span>
-        </button>
-        <button class="tab-btn" id="tab-btn-hooks" onclick="switchTab('hooks')">
-          <span>{{tabHooks}}</span>
-          <span class="tab-help-icon" data-tooltip="{{captionHooksEsc}}">?</span>
-        </button>
-      </div>
-
-      <div class="list-section-header">
-        <div class="list-title" id="list-section-title">{{tabActive}}</div>
-        <div class="list-section-controls">
-          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-layout" onclick="toggleLayoutMode()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="7" height="18" rx="1"></rect>
-              <rect x="14" y="3" width="7" height="18" rx="1"></rect>
-            </svg>
-            <span id="layout-mode-text">{{layoutModeText}}</span>
-          </button>
-          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-view" onclick="toggleViewMode()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="8" y1="6" x2="21" y2="6"></line>
-              <line x1="8" y1="12" x2="21" y2="12"></line>
-              <line x1="8" y1="18" x2="21" y2="18"></line>
-              <line x1="3" y1="6" x2="3.01" y2="6"></line>
-              <line x1="3" y1="12" x2="3.01" y2="12"></line>
-              <line x1="3" y1="18" x2="3.01" y2="18"></line>
-            </svg>
-            <span id="view-mode-text">{{viewModeText}}</span>
-          </button>
-          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-toggle-grouping" onclick="toggleGroupingMode()">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-              <line x1="3" y1="9" x2="21" y2="9"></line>
-              <line x1="9" y1="21" x2="9" y2="9"></line>
-            </svg>
-            <span id="grouping-mode-text">{{groupingModeText}}</span>
-          </button>
-          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 4px;" id="btn-refresh" title="{{refreshBtn}}" onclick="triggerRefresh(this)">
-            <svg class="refresh-spin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 4v6h-6"></path>
-              <path d="M1 20v-6h6"></path>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            <span>{{refreshBtn}}</span>
-          </button>
-          <button class="btn" id="btn-open-create-modal" style="padding: 5px 10px; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; height: 26px;">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>{{btnCreateNew}}</span>
-          </button>
-        </div>
-      </div>
-
-      <input type="text" class="search-box" id="search-input" placeholder="{{searchPlaceholder}}">
-
+    <!-- Main View List Container -->
+    <div id="main-view">
       <div class="plugin-list" id="plugin-list-container">
         <div class="no-data">{{noPlugins}}</div>
       </div>
@@ -170,116 +301,136 @@
 
     <!-- Plugin Detail view wrapper -->
     <div id="detail-view" style="display: none;">
-      <div class="detail-header">
-        <div class="detail-header-left" style="display: flex; align-items: center; gap: 12px; min-width: 0;">
-          <button class="btn btn-secondary back-btn" onclick="closePluginDetails()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-            <span>{{back}}</span>
-          </button>
-          <h2>{{pluginDetails}}: <span id="detail-plugin-title-name">...</span></h2>
+
+      <!-- Plugin Hero Card -->
+      <div class="glass-card plugin-hero-card" id="plugin-hero-card">
+        <div class="plugin-hero-top">
+          <div class="plugin-hero-identity">
+            <div class="plugin-hero-icon">🔌</div>
+            <div class="plugin-hero-names">
+              <div class="plugin-hero-title-row">
+                <span class="plugin-hero-display-name" id="hero-display-name">...</span>
+                <button class="edit-icon-btn" onclick="editMetadata('displayName')" title="{{metadataDisplayName}}">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                  </svg>
+                </button>
+                <button class="copy-name-btn hero-copy-title-btn" id="hero-copy-title-btn" title="{{copyName}}">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                <span class="plugin-hero-id-badge" id="hero-id-badge" title="ID" style="display: none;">
+                  <span id="hero-id-text">...</span>
+                  <button class="copy-name-btn" id="hero-copy-id-btn" title="{{copyName}}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </span>
+              </div>
+              
+              <div class="plugin-hero-meta-row">
+                <div id="hero-scope-badge"></div>
+                <div id="hero-status-badge"></div>
+                <span class="plugin-hero-ver-chip">
+                  <span id="hero-version">v1.0.0</span>
+                  <button class="edit-icon-btn" onclick="editMetadata('version')" title="{{metadataVersion}}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                    </svg>
+                  </button>
+                </span>
+                <span class="plugin-hero-author-chip" id="hero-author-container" style="display: none;">
+                  <span id="hero-author"></span>
+                  <button class="edit-icon-btn" onclick="editMetadata('author')" title="{{metadataAuthor}}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                    </svg>
+                  </button>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="plugin-hero-controls">
+            <div id="hero-switch-container" class="plugin-hero-toggle-box">
+              <label class="switch">
+                <input type="checkbox" id="hero-plugin-toggle">
+                <span class="slider"></span>
+              </label>
+              <span class="plugin-hero-toggle-label" id="hero-toggle-label">{{globalToggle}}</span>
+            </div>
+            <div id="hero-workspace-badge" style="display: none;">
+              <span class="card-badge-status">{{workspaceOnly}}</span>
+            </div>
+            <div id="hero-project-override-container" style="display: none; margin-top: 6px;"></div>
+            <div id="hero-update-container" style="display: none; width: 100%; margin-top: 8px;"></div>
+          </div>
         </div>
-        <div class="detail-plugin-actions-group">
-          <button class="btn btn-secondary" id="btn-detail-refresh" title="{{refreshBtn}}" style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; height: 24px;" onclick="triggerRefresh(this)">
-            <svg class="refresh-spin-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 4v6h-6"></path>
-              <path d="M1 20v-6h6"></path>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            <span>{{refreshBtn}}</span>
-          </button>
-          <button class="btn btn-secondary" id="btn-open-plugin-folder" title="{{openPluginFolderBtn}}" style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; height: 24px;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+
+        <!-- Prominent Actions Bar -->
+        <div class="plugin-hero-actions-bar">
+          <button class="btn btn-hero-action btn-hero-folder" id="btn-hero-open-folder" title="{{openPluginFolder}}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
-            <span>{{openFolderBtn}}</span>
+            <span>{{openPluginFolder}}</span>
           </button>
-          <div id="detail-switch-container">
-            <label class="switch">
-              <input type="checkbox" id="detail-plugin-toggle">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div id="detail-loader" style="display: none; padding-right: 6px;">
-            <div class="spinner-small"></div>
-          </div>
-          <button class="card-action-btn" id="detail-btn-move" title="{{move}}">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="btn btn-secondary btn-hero-action" id="btn-hero-open-manifest" title="{{openPluginManifest}}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            <span>{{openPluginManifest}}</span>
+          </button>
+          <button class="btn btn-secondary btn-hero-action" id="btn-hero-move" title="{{move}}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="17 8 21 12 17 16"></polyline>
               <line x1="3" y1="12" x2="21" y2="12"></line>
             </svg>
+            <span>{{move}}</span>
           </button>
-          <button class="card-action-btn" id="detail-btn-delete" title="{{deleteBtn}}">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
+          <button class="btn btn-secondary btn-hero-action btn-hero-delete" id="btn-hero-delete" title="{{deleteBtn}}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
+            <span>{{deleteBtn}}</span>
           </button>
         </div>
-      </div>
 
-      <div class="glass-card metadata-card">
-        <div class="metadata-row">
-          <div class="metadata-label">{{metadataDisplayName}}</div>
-          <div class="metadata-value-group">
-            <span class="metadata-value" id="meta-display-name">...</span>
-            <button class="edit-icon-btn" onclick="editMetadata('displayName')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-              </svg>
-            </button>
-          </div>
+        <!-- Filesystem Path Strip -->
+        <div class="plugin-hero-path-strip" id="hero-path-strip">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; color: #a855f7;">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="plugin-hero-path-label">{{pluginPath}}</span>
+          <span class="plugin-hero-path-val" id="hero-path-value" title="{{clickToOpenFolder}}">...</span>
+          <button class="copy-name-btn" id="hero-copy-path-btn" title="{{copyPath}}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
         </div>
-        <div class="metadata-row">
-          <div class="metadata-label">{{metadataName}}</div>
-          <div class="metadata-value-group">
-            <span class="metadata-value" id="meta-name">...</span>
-            <button class="edit-icon-btn" onclick="editMetadata('name')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="metadata-row">
-          <div class="metadata-label">{{metadataDescription}}</div>
-          <div class="metadata-value-group">
-            <span class="metadata-value" id="meta-description">...</span>
-            <button class="edit-icon-btn" onclick="editMetadata('description')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="metadata-row">
-          <div class="metadata-label">{{metadataVersion}}</div>
-          <div class="metadata-value-group">
-            <span class="metadata-value" id="meta-version">...</span>
-            <button class="edit-icon-btn" onclick="editMetadata('version')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="metadata-row">
-          <div class="metadata-label">{{metadataAuthor}}</div>
-          <div class="metadata-value-group">
-            <span class="metadata-value" id="meta-author">...</span>
-            <button class="edit-icon-btn" onclick="editMetadata('author')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-              </svg>
-            </button>
-          </div>
+
+        <!-- Description Box -->
+        <div class="plugin-hero-desc-box">
+          <div class="plugin-hero-desc-text" id="hero-description">...</div>
+          <button class="edit-icon-btn" onclick="editMetadata('description')" title="{{metadataDescription}}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -312,7 +463,6 @@
               </svg>
               <span id="detail-view-mode-text">{{detailViewModeText}}</span>
             </button>
-            <button class="btn btn-secondary" style="padding: 3px 6px; font-size: 10px; height: 20px; display: flex; align-items: center; justify-content: center;" onclick="vscode.postMessage({ command: 'refresh' })">{{refreshBtn}}</button>
             <button class="btn" style="padding: 3px 6px; font-size: 10px; display: flex; align-items: center; gap: 3px; font-weight: 500; height: 20px;" onclick="openCreateModal('skill', 'plugin', activePluginId)">
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                 <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -426,6 +576,58 @@
         <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px;">
           <button class="btn btn-secondary" id="btn-cancel-create">{{btnCancel}}</button>
           <button class="btn" id="btn-submit-create">{{btnCreate}}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Live Context Modal -->
+    <div id="live-context-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-glass); border-radius: 12px; width: 100%; max-width: 520px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-glass);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">🧠</span>
+            <div>
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #f1f5f9;">{{liveContextTitle}}</h3>
+              <p style="margin: 0; font-size: 11px; color: var(--text-muted);">{{liveContextSubtitle}}</p>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; height: 24px;" onclick="closeLiveContextModal()">✕</button>
+        </div>
+        <div id="live-context-body" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; font-size: 12px;">
+          <!-- Dynamically populated by JS -->
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border-glass); background: rgba(0,0,0,0.15);">
+          <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; gap: 4px;" onclick="requestLiveContext()">
+            <span>↻ {{refreshBtn}}</span>
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn" style="padding: 4px 12px; font-size: 11px; height: 26px; display: inline-flex; align-items: center; gap: 4px; background: #059669;" onclick="triggerSoftApply(event)">
+              <span>⚡ {{softApplyBtn}}</span>
+            </button>
+            <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px; height: 26px;" onclick="closeLiveContextModal()">{{btnClose}}</button>
+          </div>
+        </div>
+    </div>
+
+    <!-- Plugin Update Modal -->
+    <div id="plugin-update-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-glass); border-radius: 12px; width: 100%; max-width: 480px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-glass);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">🚀</span>
+            <div>
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #f1f5f9;" id="update-modal-title">{{updateModalTitle}}</h3>
+              <p style="margin: 0; font-size: 11px; color: var(--text-muted);" id="update-modal-subtitle"></p>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; height: 24px;" onclick="closePluginUpdateModal()">✕</button>
+        </div>
+        <div id="plugin-update-body" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
+          <!-- Dynamically populated by JS: versions diff, repo info, update method, progress log -->
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-glass); background: rgba(0,0,0,0.15);">
+          <button class="btn btn-secondary" id="btn-cancel-update" onclick="closePluginUpdateModal()">{{btnCancel}}</button>
+          <button class="btn" id="btn-confirm-update" style="background: #2563eb; color: white;" onclick="executePluginUpdate()">{{updateNow}}</button>
         </div>
       </div>
     </div>

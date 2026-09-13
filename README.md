@@ -2,124 +2,175 @@
 
 [Русский](#русский) | [English](#english)
 
-> ⚠️ **Эксклюзивно для Antigravity IDE**: Данное расширение разработано специально для Antigravity IDE и не совместимо со стандартным VS Code.
+> ⚠️ **Эксклюзивно для экосистемы Google Antigravity**: Разработано специально для **Antigravity IDE** и **Antigravity 2.0 (Desktop / CLI)**. Не предназначено для обычного VS Code.
 > 
-> **Exclusive for Antigravity IDE**: This extension is designed specifically for Antigravity IDE and is not compatible with standard VS Code.
+> **Exclusive to the Google Antigravity ecosystem**: Built specifically for **Antigravity IDE** and **Antigravity 2.0 (Desktop / CLI)**. Not intended for vanilla VS Code.
 
 ---
 
 ## Русский
 
-**Antigravity Plugin Manager** — это визуальный менеджер плагинов и анализатор активного окружения для **Antigravity IDE**. Он обеспечивает удобный поиск, редактирование, а также быстрое включение и выключение глобальных инструментов ИИ и навыков.
+**Antigravity Plugin Manager** — графическая панель управления плагинами, навыками, правилами и MCP-серверами для **Antigravity IDE** и **Antigravity 2.0**.
 
-### Какие проблемы решает расширение?
+Дает полный визуальный контроль над окружением ИИ-агента: смотрите, какие инструкции реально активны прямо сейчас, и переключайте их в один клик — без ручного поиска и правок в скрытых папках `.gemini`.
 
-1. **Неудобное управление плагинами и навыками в Antigravity IDE**:
-   В Antigravity IDE по умолчанию отсутствует стандартный способ простого поиска, быстрого редактирования, а также удобного включения/выключения плагинов и навыков. Находить нужные инструменты и отключать их вручную в файловой системе сложно и неудобно. Менеджер предоставляет интуитивно понятную панель управления со списками и тумблерами.
-2. **Отключение неиспользуемых инструментов для оптимизации контекста**:
-   ИИ-агенты автоматически загружают все доступные правила, навыки и воркфлоу, что может перегружать рабочий контекст ненужными инструкциями. Отключение неиспользуемых плагинов и навыков позволяет оптимизировать загружаемый в ИИ контекст. Включение и выключение плагина осуществляется путем физического перемещения его папки в специальное хранилище (Storage) и обратно.
-3. **Рутина при наведении порядка и перемещении ресурсов**:
-   Хотя в Antigravity IDE есть встроенное отображение списка активных навыков, оно статично и не позволяет управлять их структурой. Попытка навести порядок вручную — например, перенести нужный навык или правило между плагинами, глобальной папкой `.gemini` и локальной папкой проекта `.agents` — требует ручного поиска файлов на диске и превращается в утомительную рутину. Менеджер наводит **полный порядок**: вы можете в один клик перемещать навыки, правила и воркфлоу между окружениями, быстро просматривать их код и открывать их папки в проводнике.
+👉 **[Скачать готовый VSIX (Релизы)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Установка за 1 минуту • Бесплатно и с открытым исходным кодом
 
-### Установка и скачивание
-
-Готовый пакет расширения `.vsix` можно скачать со страницы релизов:
-👉 **[Последние релизы (VSIX)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**
-
-После скачивания файла установите его в Antigravity IDE (меню *Extensions* -> кнопка *... (Views and More Actions)* -> *Install from VSIX...*).
-
-> 💡 **Собственная сборка из исходников:**
-> Вместо скачивания готового релиза вы можете скомпилировать расширение самостоятельно. Для этого запустите файл `build.bat` в корневом каталоге проекта — он автоматически проверит и установит необходимые зависимости, выполнит сборку и создаст актуальный `.vsix` файл в папке `dist/`.
-
-### Основные возможности
-
-- **Включение/выключение плагинов перемещением папок**: Физический перенос папок плагинов в хранилище для отключения их влияния на контекст.
-- **Подсчет активного окружения**: Удобный мониторинг количества подключенных плагинов, навыков (Skills), локальных правил (Rules) и воркфлоу (Workflows).
-- **Перемещение ресурсов**: Удобный перенос файлов навыков, правил и воркфлоу между глобальными папками, плагинами и локальными папками открытых рабочих областей (`.agents/`).
-- **Защита от перезаписи и дублирования**: Проверка путей при переносе, исключение текущего расположения из списка назначения и защита от перезаписи файла самим собой.
-- **Интеграция со статус-баром**: Кнопка в статус-баре с быстрым счетчиком активных плагинов и подробным всплывающим Markdown-списком.
-- **Премиальный UI**: Современный интерфейс с эффектом Glassmorphism, микро-анимациями и автоматическим выбором языка (RU/EN).
-
-### Скриншоты
-
-Панель управления (Webview):
 ![Панель управления Менеджера плагинов](resources/screenshot-webview-ru.png)
 
-Боковая панель (Sidebar):
-![Боковая панель Менеджера плагинов](resources/screenshot-sidebar-ru.png)
+---
+
+### Какую проблему решает менеджер
+
+В Antigravity нет встроенного интерфейса для управления кастомизациями. На практике это создает три серьезные проблемы:
+
+1. **Слепая зона окружения (Черный ящик)**  
+   В IDE не видно, какие инструкции фактически загружены в модель прямо сейчас. Если агент начинает путаться, спорить или вызывать неподходящие инструменты, невозможно быстро понять причину: виноват забытый глобальный навык, конфликт инструкций или чужой плагин.
+
+2. **Рутина в скрытых системных папках**  
+   Чтобы включить, выключить или проверить плагин, приходится сворачивать редактор, открывать Проводник, искать скрытую директорию `%USERPROFILE%\.gemini` (или `~/.gemini`) и вручную редактировать `config.json`, `plugin.json` или `skills.json`. Это отнимает время, сбивает фокус и несет постоянный риск сломать синтаксис JSON.
+
+3. **Раздутый контекст и путаница между проектами**  
+   По умолчанию система подгружает все найденные правила и навыки одновременно. Инструкции для Python или баз данных попадают в системный промпт, даже когда вы верстаете фронтенд или пишете документацию. Контекст забивается лишним текстом, расходуются токены, а модели начинают путать правила разных проектов.
+
+---
+
+### Возможности
+
+* 📊 **Дашборд «Активное»:** моментально показывает список и точное количество реально действующих плагинов, правил, навыков, воркфлоу, MCP-серверов и хуков. Плюс компактный счетчик в статус-баре IDE с подробной подсказкой.
+* 🎛️ **Переключение в один клик:** включайте и выключайте плагины, навыки и MCP-серверы простыми тумблерами прямо в интерфейсе без ручной правки JSON.
+* 🎯 **Настройки под проект (Project Overrides):** держите плагин выключенным глобально, но включайте его в 1 клик для конкретного репозитория (`[✓ Вкл]`). Или заглушите тяжелый инструмент в текущем проекте (`[✕ Выкл]`), не меняя общих настроек.
+* ⚡ **Мягкое применение за 1–2 секунды (Soft Apply):** перезапускает только фоновый языковой сервер Antigravity. Окно IDE, открытые файлы и история чатов остаются на месте, а обновленный контекст применяется на лету.
+* 📦 **Порядок и перенос ресурсов:** переносите навыки, правила и воркфлоу между глобальной папкой (`.gemini`), репозиториями проектов (`.agents/`) и плагинами со встроенной защитой от коллизий и перезаписи.
+* 📁 **Мгновенный доступ к коду:** кнопки быстрого перехода открывают `SKILL.md`, `GEMINI.md` или `plugin.json` в редакторе, а папки плагинов — напрямую в Проводнике Windows.
+* 🔄 **Обновление плагинов из GitHub:** проверяет наличие новых версий в репозиториях авторов и обновляет плагины в один клик с наглядным выводом процесса.
+* 👁️ **Инспектор контекста (Live Context):** считывает сессии Antigravity и показывает, какие именно инструкции фактически ушли в системный промпт в последнем сообщении.
+
+---
+
+### Как это работает: нативная конфигурация без поломки Git
+
+Antigravity штатно поддерживает управление активностью кастомизаций через файлы конфигураций, но не имеет встроенного графического интерфейса:
+* `plugin.json` (`"disabled": true/false`) — официальный флаг активности в манифесте плагина.
+* `config.json` (`"enabled": true/false`) — системный реестр активности для Antigravity 2.0 и CLI.
+* `plugins.json` и `skills.json` — списки исключений (`"exclude"`) и точечного включения (`"include_only"`).
+
+**Без перемещения и переименования папок:**
+Каталоги плагинов и навыков всегда остаются на своих исходных местах. Менеджер управляет нативными JSON-настройками Antigravity: ваши Git-репозитории и сабмодули не ломаются, файлы не теряются, а языковой сервер мгновенно подхватывает изменения.
+
+---
+
+### Честные ограничения
+
+* ⚠️ **Только для экосистемы Google Antigravity:** Расширение разработано специально для **Antigravity IDE** и **Antigravity 2.0 (Desktop / CLI)**. Для стандартного VS Code оно не предназначено, так как там нет системы агентов и кастомизаций Antigravity.
+* **Встроенные системные компоненты (`builtin`):** Системные навыки и конфигурации, поставляемые вместе с IDE, доступны только для чтения и защищены от случайного удаления.
+
+---
+
+### Установка
+
+1. Скачайте актуальный файл `.vsix` со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**.
+2. В Antigravity IDE откройте панель расширений (`Ctrl+Shift+X`).
+3. Нажмите на меню с тремя точками `...` в правом верхнем углу панели ➔ **Install from VSIX...** и выберите скачанный файл.
+
+> 💡 **Сборка из исходников:**
+> Склонируйте репозиторий и запустите `build.bat` в корне проекта. Скрипт соберет актуальный `.vsix` в каталог `dist/`.
+
+---
 
 ### Рекомендуемые расширения-компаньоны
-- **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — визуальный менеджер чатов и автоматический сборщик мусора для очистки диска от неиспользуемых диалогов ИИ.
 
-### Системные требования и Совместимость
+* **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — визуальный менеджер истории диалогов, поиск по сессиям и очистка диска от мусора ИИ в Antigravity.
 
-- Совместимость: Antigravity IDE (Windows, macOS, Linux).
-- Требования для сборки: Node.js версии 18 или выше.
+---
 
-### От автора: сделано с душой ❤️
-Привет! Этот плагин был создан не просто как утилита, а как попытка сделать ежедневную работу в Antigravity IDE чуточку приятнее, избавив от рутины ручного перекладывания файлов на диске. Я вложил много сил в проработку деталей — от плавных визуальных эффектов и Glassmorphism-дизайна до надежной рантайм-совместимости.
+### Обратная связь ❤️
 
-Если этот менеджер сэкономил вам время, принес пользу или просто порадовал глаз:
-- **Поддержите проект звездой** 🌟 на нашем [GitHub Репозитории](https://github.com/MaximXR/Antigravity-Plugin-Manager) — это помогает другим разработчикам узнать о проекте.
-- **Оставьте пару слов или отзыв** на [Open-VSX.org](https://open-vsx.org/extension/MaximXR/antigravity-plugin-manager). Любая обратная связь невероятно мотивирует писать чистый код и добавлять новые полезные функции.
-
-Каждая звезда и каждый отзыв — это теплое подтверждение того, что эта работа действительно кому-то помогает. Спасибо вам! 😊
+Этот инструмент создавался, чтобы превратить настройку окружения Antigravity из утомительного копания в скрытых системных папках в быстрый и наглядный процесс. Если расширение помогает вам в работе:
+* Поставьте звездочку 🌟 репозиторию на [GitHub](https://github.com/MaximXR/Antigravity-Plugin-Manager).
+* Оставьте отзыв на [Open-VSX.org](https://open-vsx.org/extension/MaximXR/antigravity-plugin-manager).
 
 ---
 
 ## English
 
-**Antigravity Plugin Manager** is a visual plugin controller and active environment analyzer for **Antigravity IDE**. It provides a single-click interface to search, edit, toggle (enable/disable) global AI tools, and optimize active context parameters.
+**Antigravity Plugin Manager** is a visual control panel for plugins, skills, rules, and MCP servers in **Antigravity IDE** and **Antigravity 2.0**.
 
-### What Problems Does It Solve?
+Gain complete visibility and control over your AI agent's environment: see what instructions are actually active right now, and toggle customizations in a single click — without digging through hidden `.gemini` folders.
 
-1. **Inconvenient Plugin and Skill Management in Antigravity IDE**:
-   By default, Antigravity IDE lacks a built-in interface to easily search, edit, enable, or disable global plugins and skills. Managing these items manually in the file system is difficult and slow. The manager solves this by providing a unified dashboard with quick toggles and tabs.
-2. **Disabling Unused Tools to Optimize Context**:
-   AI agents automatically read all active rules, skills, and workflows in the system. Disabling unused plugins and skills helps optimize the active context loaded by the AI. Enabling and disabling is achieved by physically moving directory folders into offline storage and back.
-3. **Tedious Relocation & Maintenance (Bringing Order)**:
-   Although Antigravity IDE has a basic display for active skills, it is static and does not allow you to manage their structure. Organizing your environment—such as manually moving skills or rules between global directories (`.gemini`), plugins, and local project folders (`.agents`)—requires tedious file searching and path resolution. The manager establishes **complete order**: you can relocate skills, rules, and workflows between environments with a single click, view their code, and quickly jump to their directories on disk.
+👉 **[Download Ready-to-Use VSIX (Releases)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • 1-Minute Setup • Free & Open Source
 
-### Installation & Download
-
-You can download the compiled `.vsix` extension file from the GitHub releases page:
-👉 **[Download Latest Releases (VSIX)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**
-
-After downloading, install it in Antigravity IDE (via *Extensions* menu -> click *... (Views and More Actions)* -> *Install from VSIX...*).
-
-> 💡 **Building from Source:**
-> Instead of downloading a pre-built release, you can compile the extension yourself. Simply run the `build.bat` script in the project root directory — it will verify dependencies, package the extension, and place the output `.vsix` file in the `dist/` folder.
-
-### Key Features
-
-- **Plugin Toggling via Folder Movement**: Physically move folders to/from offline storage to disable them from the active AI context.
-- **Environment Element Tallies**: Track active count totals for plugins, skills, local rules, and workflows.
-- **Resource Relocation**: Relocate skills, rules, and workflows between global folders, plugins, and local workspaces (`.agents/` folder).
-- **Protection & Safeguards**: Conflict resolution warnings, dynamic source location filtering in the target pick menu, and self-move safeguards.
-- **Status Bar Indicator**: Quick active/total count button with a rich markdown hover tooltip.
-- **Premium UI**: Sleek glassmorphism layout, micro-animations, and automatic bilingual detection (RU/EN).
-
-### Screenshots
-
-Control Panel (Webview):
 ![Plugin Manager Control Panel](resources/screenshot-webview-en.png)
 
-Sidebar:
-![Plugin Manager Sidebar](resources/screenshot-sidebar-en.png)
+---
+
+### The Problem It Solves
+
+Antigravity does not provide a built-in UI for managing customizations. In practice, this creates three major bottlenecks:
+
+1. **Zero Visibility (The Black Box Context)**  
+   The IDE gives you no way to see what instructions are actually loaded into the model at any given moment. When an agent hallucinates, ignores instructions, or triggers unexpected tools, it is difficult to identify the culprit: a forgotten global skill, conflicting rules, or an outdated plugin.
+
+2. **Tedious Manual Work in Hidden Folders**  
+   To enable, disable, or inspect a plugin or skill, you have to leave your code, open File Explorer, navigate to the hidden `%USERPROFILE%\.gemini` (or `~/.gemini`) directory, and manually edit `config.json`, `plugin.json`, or `skills.json`. It is slow, disrupts your workflow, and risks breaking JSON syntax.
+
+3. **Context Bloat & Cross-Project Clutter**  
+   By default, Antigravity loads all discovered rules and skills simultaneously. Backend instructions for Python or databases stay loaded in memory even when you are working on a React frontend or editing documentation. The system prompt fills up with irrelevant instructions, wasting context capacity and confusing the model between different project rules.
+
+---
+
+### Key Capabilities
+
+* 📊 **"Active" Dashboard:** Instantly displays exact counts and lists of active plugins, rules, skills, workflows, MCP servers, and hooks. Includes a compact status bar counter with rich hover tooltips.
+* 🎛️ **1-Click Toggles:** Enable or disable plugins, skills, and MCP servers with simple switches directly in the UI without touching raw JSON files.
+* 🎯 **Project-Level Overrides:** Keep a plugin disabled globally, but enable it in one click for a specific repository (`[✓ On]`). Or suppress a heavy tool in one project (`[✕ Off]`) without altering your global setup.
+* ⚡ **1–2 Second Soft Apply:** Restarts only the background Antigravity language server. Your IDE window, open files, and active chat sessions remain untouched while context refreshes on the fly.
+* 📦 **Safe Resource Organization:** Move skills, rules, and workflows between global storage (`.gemini`), workspace projects (`.agents/`), and plugin packages with built-in safeguards against file overwrites.
+* 📁 **Instant File & Folder Access:** Open `SKILL.md`, `GEMINI.md`, or `plugin.json` in the editor with one click, or jump directly to plugin folders in File Explorer.
+* 🔄 **GitHub 1-Click Updates:** Checks author repositories for newer plugin versions and updates them in one click with a transparent process log.
+* 👁️ **Live Context Inspector:** Inspects active IDE conversation records to reveal the exact instructions delivered to the model in the latest message turn.
+
+---
+
+### How It Works: Native Configuration Without Breaking Git
+
+Antigravity natively supports managing customizations through configuration files, but provides no graphical interface to interact with them:
+* `plugin.json` (`"disabled": true/false`) — official manifest toggle flag.
+* `config.json` (`"enabled": true/false`) — system activation registry for Antigravity 2.0 and CLI.
+* `plugins.json` & `skills.json` — `"exclude"` and `"include_only"` filtering arrays.
+
+**No folder moving or renaming:**
+Plugin and skill directories always remain in their original locations. The manager only modifies standard JSON configuration files: your Git repositories and submodules are never disturbed, files are never misplaced, and the Antigravity language server picks up changes cleanly.
+
+---
+
+### Honest Limitations
+
+* ⚠️ **Antigravity Ecosystem Only:** Designed exclusively for **Antigravity IDE** and **Antigravity 2.0 (Desktop / CLI)**. It does not work with standard VS Code, as vanilla VS Code lacks Antigravity's agent customization engine.
+* **Built-in System Components (`builtin`):** System skills and configurations bundled with the IDE are strictly read-only to prevent breaking the environment.
+
+---
+
+### Installation
+
+1. Download the `.vsix` file from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page.
+2. In Antigravity IDE, open the Extensions panel (`Ctrl+Shift+X`).
+3. Click the `...` menu (top-right corner of the Extensions panel) ➔ **Install from VSIX...** and select the downloaded file.
+
+> 💡 **Build from Source:**
+> Clone the repository and run `build.bat` in the project root. The script compiles the extension and places the `.vsix` in `dist/`.
+
+---
 
 ### Recommended Companion Extensions
-- **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — a visual dialogue history manager and garbage collector to clean up unused AI workspace files.
 
-### Prerequisites & Compatibility
+* **[Antigravity Chat Manager](https://github.com/MaximXR/Antigravity-Chat-Manager)** — visual conversation history manager, full-text search, and disk cleanup tool for Antigravity AI sessions.
 
-- Compatibility: Antigravity IDE (Windows, macOS, Linux).
-- Build Requirements: Node.js v18 or newer.
+---
 
-### From the Author: Crafted with Care ❤️
-Hi there! This plugin was created not just as a basic utility, but as a sincere effort to make daily life in Antigravity IDE smoother, freeing you from manually rearranging directories. I spent a lot of time polishing the small details — from smooth animations and glassmorphism styling to solid safeguards that protect your local files.
+### Feedback ❤️
 
-If this plugin manager saved you some time, made your life easier, or simply looked neat:
-- **Star this repository** 🌟 on our [GitHub Repository](https://github.com/MaximXR/Antigravity-Plugin-Manager) to help other developers discover this tool.
-- **Write a brief review** on [Open-VSX.org](https://open-vsx.org/extension/MaximXR/antigravity-plugin-manager). Any feedback, kind words, or suggestions keep me highly motivated to improve the code and build new features.
+Built to turn Antigravity environment configuration from a frustrating chore in hidden directories into a clean, transparent workflow. If this tool helps your development:
+* Star the repository 🌟 on [GitHub](https://github.com/MaximXR/Antigravity-Plugin-Manager).
+* Leave a review on [Open-VSX.org](https://open-vsx.org/extension/MaximXR/antigravity-plugin-manager).
 
-Every star and review is a warm confirmation that this hard work makes a real difference. Thank you for your support! 😊

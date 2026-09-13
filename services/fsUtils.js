@@ -460,7 +460,12 @@ function countHooks(baseDir) {
 
 function parseFrontmatter(content) {
   const result = {};
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!content || typeof content !== 'string') return result;
+
+  // Strip leading comments and blank lines before the first frontmatter separator
+  const cleanHead = content.replace(/^(?:\s*<!--[\s\S]*?-->\s*)+/, '');
+  const match = cleanHead.match(/^---\r?\n([\s\S]*?)\r?\n---/) || content.match(/(?:^|\r?\n)---\r?\n([\s\S]*?)\r?\n---/);
+
   if (match) {
     const yamlBlock = match[1];
     const lines = yamlBlock.split('\n');
@@ -473,11 +478,12 @@ function parseFrontmatter(content) {
       if (!line) continue;
 
       if (isMultiLine) {
-        if (rawLine.startsWith('  ') || rawLine.startsWith('\t')) {
+        if (/^\s+/.test(rawLine)) {
           multiLineVal.push(rawLine.trim());
           continue;
         } else {
-          result[currentKey] = multiLineVal.join(' ');
+          let assembled = multiLineVal.join(' ').replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
+          result[currentKey] = assembled;
           isMultiLine = false;
           currentKey = null;
           multiLineVal = [];
@@ -489,7 +495,7 @@ function parseFrontmatter(content) {
         const key = kvMatch[1].trim();
         let val = kvMatch[2].trim();
 
-        if (val === '|' || val === '>') {
+        if (!val || /^[|>][-+]?$/.test(val)) {
           currentKey = key;
           isMultiLine = true;
           multiLineVal = [];
@@ -497,12 +503,14 @@ function parseFrontmatter(content) {
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.substring(1, val.length - 1);
           }
+          val = val.replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
           result[key] = val;
         }
       }
     }
     if (isMultiLine && currentKey) {
-      result[currentKey] = multiLineVal.join(' ');
+      let assembled = multiLineVal.join(' ').replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
+      result[currentKey] = assembled;
     }
   }
   return result;
@@ -525,7 +533,8 @@ function readPluginInfo(pluginDir) {
     displayName: name,
     description: '',
     version: '1.0.0',
-    author: ''
+    author: '',
+    disabled: false
   };
 
   if (fs.existsSync(pluginJsonPath)) {
@@ -539,6 +548,9 @@ function readPluginInfo(pluginDir) {
       info.author = (typeof data.author === 'object' && data.author !== null) 
         ? String(data.author.name || '') 
         : String(data.author || '');
+      info.disabled = data.disabled === true;
+      info.repository = data.repository || '';
+      info.homepage = data.homepage || '';
     } catch (e) {
       logDebug(`Error parsing plugin.json for ${name}: ${e.message}`);
     }
@@ -712,18 +724,24 @@ function readSkillInfo(skillDir) {
     try {
       const content = fs.readFileSync(skillMdPath, 'utf8');
       const titleMatch = content.match(/^#{1,6}\s+(.+)$/m);
-      if (titleMatch) displayName = titleMatch[1].trim();
+      if (titleMatch) {
+        displayName = titleMatch[1].replace(/<!--[\s\S]*?-->/g, '').trim();
+      }
       
       const fm = parseFrontmatter(content);
       if (fm.name) {
         resolvedName = fm.name.trim();
       }
       if (fm.description) {
-        description = fm.description.replace(/\s+/g, ' ').trim();
+        description = fm.description.replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
       } else {
-        const cleanContent = content.replace(/^#{1,6}\s+.+$/m, '').trim();
-        const firstParagraph = cleanContent.split('\n\n')[0] || '';
-        description = firstParagraph.replace(/\s+/g, ' ').trim();
+        const cleanContent = content
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/^(?:\s*<!--[\s\S]*?-->\s*)*---\r?\n[\s\S]*?\r?\n---/, '')
+          .replace(/^#{1,6}\s+.+$/gm, '')
+          .trim();
+        const firstParagraph = cleanContent.split(/\r?\n\r?\n/)[0] || '';
+        description = firstParagraph.replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
       }
     } catch (e) {
       logDebug(`Error parsing SKILL.md for ${name}: ${e.message}`);
@@ -784,6 +802,529 @@ function writePluginMetaField(pluginDir, field, value) {
   fs.writeFileSync(pluginJsonPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+// Antigravity Native Config & JSON Config Helpers
+function getAntigravityConfigPath() {
+  return path.join(os.homedir(), '.gemini', 'config', 'config.json');
+}
+
+function getGlobalPluginsJsonPath() {
+  return path.join(os.homedir(), '.gemini', 'config', 'plugins.json');
+}
+
+function getGlobalSkillsJsonPath() {
+  return path.join(os.homedir(), '.gemini', 'config', 'skills.json');
+}
+
+function getWorkspacePluginConfigPath(wsRoot) {
+  return path.join(wsRoot, '.agents', 'plugins.json');
+}
+
+function getWorkspaceSkillConfigPath(wsRoot) {
+  return path.join(wsRoot, '.agents', 'skills.json');
+}
+
+function getAntigravityConfig() {
+  const cfgPath = getAntigravityConfigPath();
+  if (fs.existsSync(cfgPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    } catch (e) {
+      logDebug(`Error reading config.json: ${e.message}`);
+    }
+  }
+  return {};
+}
+
+function saveAntigravityConfig(config) {
+  const cfgPath = getAntigravityConfigPath();
+  try {
+    const dir = path.dirname(cfgPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2), 'utf8');
+  } catch (e) {
+    logDebug(`Error saving config.json: ${e.message}`);
+    throw e;
+  }
+}
+
+function setAntigravityPluginEnabled(pluginDirName, enabled) {
+  const config = getAntigravityConfig();
+  if (!config.plugins) config.plugins = {};
+  if (!config.plugins[pluginDirName]) config.plugins[pluginDirName] = {};
+  config.plugins[pluginDirName].enabled = !!enabled;
+  saveAntigravityConfig(config);
+}
+
+function removeAntigravityPluginFromConfig(pluginDirName) {
+  const config = getAntigravityConfig();
+  if (config.plugins && config.plugins[pluginDirName]) {
+    delete config.plugins[pluginDirName];
+    saveAntigravityConfig(config);
+  }
+}
+
+function setPluginManifestDisabled(pluginDir, disabled) {
+  const manifestPath = path.join(pluginDir, 'plugin.json');
+  if (!fs.existsSync(manifestPath)) return;
+  try {
+    const raw = fs.readFileSync(manifestPath, 'utf8');
+    const data = JSON.parse(raw);
+    data.disabled = !!disabled;
+    fs.writeFileSync(manifestPath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    logDebug(`Error updating plugin.json in ${pluginDir}: ${e.message}`);
+  }
+}
+
+function isAntigravityPluginGloballyEnabled(pluginDirName, defaultDisabled = false) {
+  const config = getAntigravityConfig();
+  if (config.plugins && config.plugins[pluginDirName] && config.plugins[pluginDirName].enabled !== undefined) {
+    return !!config.plugins[pluginDirName].enabled;
+  }
+  return !defaultDisabled;
+}
+
+function normalizePathSeparators(p) {
+  if (!p) return '';
+  return p.replace(/\\/g, '/');
+}
+
+function resolveJsonConfigPath(rawPath, baseDir) {
+  if (!rawPath) return '';
+  let resolved = rawPath.trim();
+  if (resolved === '~' || resolved.startsWith('~/') || resolved.startsWith('~\\')) {
+    resolved = path.join(os.homedir(), resolved.slice(1));
+  } else if (!path.isAbsolute(resolved) && baseDir) {
+    resolved = path.resolve(baseDir, resolved);
+  }
+  return path.normalize(resolved);
+}
+
+function formatPathForConfig(fullPath, wsRoot = null) {
+  const normFull = path.normalize(fullPath);
+  if (wsRoot) {
+    const normWs = path.normalize(wsRoot);
+    const rel = path.relative(normWs, normFull);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+      return normalizePathSeparators(rel);
+    }
+  }
+  const normHome = path.normalize(os.homedir());
+  const relHome = path.relative(normHome, normFull);
+  if (!relHome.startsWith('..') && !path.isAbsolute(relHome)) {
+    return normalizePathSeparators('~/' + relHome);
+  }
+  return normalizePathSeparators(normFull);
+}
+
+function readJsonConfigFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { entries: [], inherits: [], exclude: [], include_only: [] };
+  }
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      entries: Array.isArray(data.entries) ? data.entries : [],
+      inherits: Array.isArray(data.inherits) ? data.inherits : [],
+      exclude: Array.isArray(data.exclude) ? data.exclude : [],
+      include_only: Array.isArray(data.include_only) ? data.include_only : []
+    };
+  } catch (e) {
+    logDebug(`Error reading JSON config ${filePath}: ${e.message}`);
+    return { entries: [], inherits: [], exclude: [], include_only: [] };
+  }
+}
+
+function writeJsonConfigFile(filePath, data) {
+  try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    logDebug(`Error writing JSON config ${filePath}: ${e.message}`);
+    throw e;
+  }
+}
+
+function isPatternMatch(name, patterns) {
+  if (!name || !patterns || !Array.isArray(patterns) || patterns.length === 0) return false;
+  const target = String(name).trim().toLowerCase();
+  return patterns.some(pat => {
+    if (!pat) return false;
+    const str = String(pat).trim();
+    if (str.toLowerCase() === target) return true;
+    if (str.includes('*') || str.includes('?')) {
+      try {
+        const regexStr = '^' + str.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.') + '$';
+        return new RegExp(regexStr, 'i').test(name);
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  });
+}
+
+function addEntryToJsonConfig(configPath, targetPath, options = {}, wsRoot = null) {
+  const config = readJsonConfigFile(configPath);
+  const formatted = formatPathForConfig(targetPath, wsRoot);
+  const normTarget = path.normalize(targetPath).toLowerCase();
+
+  const existingIdx = config.entries.findIndex(entry => {
+    const entryP = typeof entry === 'string' ? entry : entry.path;
+    const resolved = resolveJsonConfigPath(entryP, path.dirname(configPath));
+    return path.normalize(resolved).toLowerCase() === normTarget;
+  });
+
+  if (existingIdx === -1) {
+    config.entries.push({ path: formatted, ...options });
+  } else if (typeof config.entries[existingIdx] === 'object') {
+    config.entries[existingIdx] = { ...config.entries[existingIdx], path: formatted, ...options };
+  }
+  writeJsonConfigFile(configPath, config);
+}
+
+function removeEntryFromJsonConfig(configPath, targetPath) {
+  const config = readJsonConfigFile(configPath);
+  const normTarget = path.normalize(targetPath).toLowerCase();
+  const baseNameTarget = path.basename(targetPath).toLowerCase();
+
+  config.entries = config.entries.filter(entry => {
+    const entryP = typeof entry === 'string' ? entry : entry.path;
+    const resolved = resolveJsonConfigPath(entryP, path.dirname(configPath));
+    if (path.normalize(resolved).toLowerCase() === normTarget) return false;
+    if (path.basename(resolved).toLowerCase() === baseNameTarget) return false;
+    return true;
+  });
+
+  writeJsonConfigFile(configPath, config);
+}
+
+function addExcludeToJsonConfig(configPath, pattern, targetPhysicalPath = null) {
+  const config = readJsonConfigFile(configPath);
+  let handledInEntry = false;
+  if (targetPhysicalPath && config.entries && Array.isArray(config.entries)) {
+    const normTarget = path.normalize(targetPhysicalPath).toLowerCase();
+    for (const entry of config.entries) {
+      if (typeof entry === 'object' && entry.path) {
+        const resolved = resolveJsonConfigPath(entry.path, path.dirname(configPath));
+        const normEntry = path.normalize(resolved).toLowerCase();
+        if (normTarget.startsWith(normEntry) && normTarget !== normEntry) {
+          if (!entry.exclude) entry.exclude = [];
+          if (!entry.exclude.includes(pattern)) {
+            entry.exclude.push(pattern);
+          }
+          handledInEntry = true;
+        }
+      }
+    }
+  }
+
+  if (!handledInEntry) {
+    if (!config.exclude) config.exclude = [];
+    if (!config.exclude.includes(pattern)) {
+      config.exclude.push(pattern);
+    }
+  } else if (config.exclude && Array.isArray(config.exclude)) {
+    // If handled in entry, remove from top-level universal blacklist to allow per-project overrides
+    config.exclude = config.exclude.filter(p => p.toLowerCase() !== pattern.toLowerCase());
+  }
+
+  writeJsonConfigFile(configPath, config);
+}
+
+function removeExcludeFromJsonConfig(configPath, pattern) {
+  const config = readJsonConfigFile(configPath);
+  if (config.exclude && Array.isArray(config.exclude)) {
+    config.exclude = config.exclude.filter(p => p.toLowerCase() !== pattern.toLowerCase());
+  }
+  if (config.entries && Array.isArray(config.entries)) {
+    for (const entry of config.entries) {
+      if (typeof entry === 'object' && entry.exclude && Array.isArray(entry.exclude)) {
+        entry.exclude = entry.exclude.filter(p => p.toLowerCase() !== pattern.toLowerCase());
+      }
+    }
+  }
+  writeJsonConfigFile(configPath, config);
+}
+
+function isPathInJsonConfigEntries(configPath, targetPath, itemName = '') {
+  if (!fs.existsSync(configPath)) return false;
+  const config = readJsonConfigFile(configPath);
+  const normTarget = targetPath ? path.normalize(targetPath).toLowerCase() : '';
+  const nameToMatch = (itemName || (targetPath ? path.basename(targetPath) : '')).toLowerCase();
+
+  return config.entries.some(entry => {
+    const entryP = typeof entry === 'string' ? entry : entry.path;
+    if (!entryP) return false;
+    const resolved = resolveJsonConfigPath(entryP, path.dirname(configPath));
+    if (normTarget && path.normalize(resolved).toLowerCase() === normTarget) return true;
+    if (nameToMatch && path.basename(resolved).toLowerCase() === nameToMatch) return true;
+    return false;
+  });
+}
+
+function isNameExcludedInJsonConfig(configPath, name, targetPhysicalPath = null) {
+  if (!fs.existsSync(configPath)) return false;
+  const config = readJsonConfigFile(configPath);
+  if (isPatternMatch(name, config.exclude)) return true;
+
+  if (config.entries && Array.isArray(config.entries)) {
+    const normTarget = targetPhysicalPath ? path.normalize(targetPhysicalPath).toLowerCase() : '';
+    for (const entry of config.entries) {
+      if (typeof entry === 'object' && entry.exclude && Array.isArray(entry.exclude)) {
+        if (normTarget && entry.path) {
+          const resolved = resolveJsonConfigPath(entry.path, path.dirname(configPath));
+          const normEntry = path.normalize(resolved).toLowerCase();
+          if (normTarget.startsWith(normEntry)) {
+            if (isPatternMatch(name, entry.exclude)) return true;
+          }
+        } else if (!normTarget) {
+          if (isPatternMatch(name, entry.exclude)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function touchAntigravityConfigs() {
+  try {
+    const now = new Date();
+    const paths = [
+      getAntigravityConfigPath(),
+      getGlobalPluginsJsonPath(),
+      getGlobalSkillsJsonPath()
+    ];
+    if (vscode.workspace && vscode.workspace.workspaceFolders) {
+      for (const wf of vscode.workspace.workspaceFolders) {
+        paths.push(getWorkspacePluginConfigPath(wf.uri.fsPath));
+        paths.push(getWorkspaceSkillConfigPath(wf.uri.fsPath));
+      }
+    }
+    for (const p of paths) {
+      if (fs.existsSync(p)) {
+        try {
+          fs.utimesSync(p, now, now);
+        } catch (e) {}
+      }
+    }
+  } catch (e) {
+    logDebug(`touchAntigravityConfigs error: ${e.message}`);
+  }
+}
+
+// Ensures that the default global plugins folder (~/.gemini/config/plugins) is preserved
+// in plugins.json.entries when external plugin repositories are configured.
+// Without this, Antigravity IDE's scanner shadows/ignores ~/.gemini/config/plugins.
+function ensureDefaultPluginsFolderInGlobalConfig() {
+  try {
+    const globalPluginsJson = getGlobalPluginsJsonPath();
+    const defaultPluginsPath = getActivePluginsPath();
+    if (!fs.existsSync(globalPluginsJson)) return;
+
+    const data = readJsonConfigFile(globalPluginsJson);
+    if (!data.entries || data.entries.length === 0) return;
+
+    const normDefault = path.normalize(defaultPluginsPath).toLowerCase();
+    const hasDefault = data.entries.some(e => {
+      const p = typeof e === 'string' ? e : e.path;
+      if (!p) return false;
+      const resolved = resolveJsonConfigPath(p, path.dirname(globalPluginsJson));
+      return path.normalize(resolved).toLowerCase() === normDefault;
+    });
+
+    if (!hasDefault) {
+      data.entries.unshift({ path: defaultPluginsPath.replace(/\\/g, '/') });
+      fs.writeFileSync(globalPluginsJson, JSON.stringify(data, null, 2), 'utf8');
+      logDebug(`ensureDefaultPluginsFolderInGlobalConfig: added ${defaultPluginsPath} to plugins.json`);
+    }
+  } catch (e) {
+    logDebug(`ensureDefaultPluginsFolderInGlobalConfig error: ${e.message}`);
+  }
+}
+
+
+// Cleans up the default plugins folder from plugins.json if no external repositories remain
+function cleanupDefaultPluginsFolderInGlobalConfig() {
+  try {
+    const globalPluginsJson = getGlobalPluginsJsonPath();
+    const defaultPluginsPath = getActivePluginsPath();
+    if (!fs.existsSync(globalPluginsJson)) return;
+
+    const data = readJsonConfigFile(globalPluginsJson);
+    if (!data.entries || data.entries.length === 0) return;
+
+    const normDefault = path.normalize(defaultPluginsPath).toLowerCase();
+    const otherEntries = data.entries.filter(e => {
+      const p = typeof e === 'string' ? e : e.path;
+      if (!p) return false;
+      const resolved = resolveJsonConfigPath(p, path.dirname(globalPluginsJson));
+      return path.normalize(resolved).toLowerCase() !== normDefault;
+    });
+
+    if (otherEntries.length === 0) {
+      data.entries = [];
+      fs.writeFileSync(globalPluginsJson, JSON.stringify(data, null, 2), 'utf8');
+      logDebug('cleanupDefaultPluginsFolderInGlobalConfig: reset plugins.json entries to empty');
+    }
+  } catch (e) {
+    logDebug(`cleanupDefaultPluginsFolderInGlobalConfig error: ${e.message}`);
+  }
+}
+
+function migrateFromLegacyStorage(context) {
+  try {
+    const storagePath = getGlobalStoragePath(context);
+    if (!fs.existsSync(storagePath)) return { migrated: 0 };
+
+    logDebug(`Checking legacy storage for migration at ${storagePath}`);
+    const activePluginsDir = getActivePluginsPath();
+    const activeSkillsDir = getActiveSkillsPath();
+    const activeWorkflowsDir = getActiveWorkflowsPath();
+
+    if (!fs.existsSync(activePluginsDir)) fs.mkdirSync(activePluginsDir, { recursive: true });
+    if (!fs.existsSync(activeSkillsDir)) fs.mkdirSync(activeSkillsDir, { recursive: true });
+    if (!fs.existsSync(activeWorkflowsDir)) fs.mkdirSync(activeWorkflowsDir, { recursive: true });
+
+    let migratedCount = 0;
+    const disabledPlugins = [];
+
+    // 1. Storage plugins
+    const storagePluginsDir = path.join(storagePath, 'plugins');
+    const pluginDirsToCheck = [];
+    if (fs.existsSync(storagePluginsDir)) {
+      pluginDirsToCheck.push(storagePluginsDir);
+    }
+    pluginDirsToCheck.push(storagePath);
+
+    for (const sDir of pluginDirsToCheck) {
+      if (!fs.existsSync(sDir)) continue;
+      const entries = fs.readdirSync(sDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name !== 'plugins' && entry.name !== 'skills' && entry.name !== 'workflows') {
+          const srcPath = path.join(sDir, entry.name);
+          const destPath = path.join(activePluginsDir, entry.name);
+          
+          let isSymlink = false;
+          try {
+            isSymlink = fs.lstatSync(srcPath).isSymbolicLink();
+          } catch (e) {}
+
+          if (isSymlink) {
+            try { fs.unlinkSync(srcPath); } catch (e) {}
+            continue;
+          }
+
+          if (fs.existsSync(destPath)) {
+            try {
+              if (fs.lstatSync(destPath).isSymbolicLink()) {
+                fs.unlinkSync(destPath);
+              }
+            } catch (e) {}
+          }
+
+          if (!fs.existsSync(destPath)) {
+            safeMoveDir(srcPath, destPath);
+            migratedCount++;
+            disabledPlugins.push(entry.name);
+          } else {
+            mergeDirs(srcPath, destPath);
+            try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (e) {}
+            migratedCount++;
+            disabledPlugins.push(entry.name);
+          }
+        }
+      }
+    }
+
+    // 2. Storage skills
+    const storageSkillsDir = path.join(storagePath, 'skills');
+    if (fs.existsSync(storageSkillsDir)) {
+      const entries = fs.readdirSync(storageSkillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const srcPath = path.join(storageSkillsDir, entry.name);
+          const destPath = path.join(activeSkillsDir, entry.name);
+          try {
+            if (fs.existsSync(destPath) && fs.lstatSync(destPath).isSymbolicLink()) {
+              fs.unlinkSync(destPath);
+            }
+          } catch (e) {}
+
+          if (!fs.existsSync(destPath)) {
+            safeMoveDir(srcPath, destPath);
+            migratedCount++;
+          } else {
+            mergeDirs(srcPath, destPath);
+            try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (e) {}
+            migratedCount++;
+          }
+        }
+      }
+    }
+
+    // 3. Storage workflows
+    const storageWorkflowsDir = path.join(storagePath, 'workflows');
+    if (fs.existsSync(storageWorkflowsDir)) {
+      const entries = fs.readdirSync(storageWorkflowsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          const srcPath = path.join(storageWorkflowsDir, entry.name);
+          const destPath = path.join(activeWorkflowsDir, entry.name);
+          try {
+            if (fs.existsSync(destPath) && fs.lstatSync(destPath).isSymbolicLink()) {
+              fs.unlinkSync(destPath);
+            }
+          } catch (e) {}
+
+          if (!fs.existsSync(destPath)) {
+            safeMoveDir(srcPath, destPath);
+            migratedCount++;
+          } else {
+            try { fs.unlinkSync(srcPath); } catch (e) {}
+          }
+        }
+      }
+    }
+
+    // 4. Mark migrated plugins as enabled: false in config.json
+    if (disabledPlugins.length > 0) {
+      const cfg = getAntigravityConfig();
+      if (!cfg.plugins) cfg.plugins = {};
+      for (const pName of disabledPlugins) {
+        if (!cfg.plugins[pName]) {
+          cfg.plugins[pName] = { enabled: false };
+        }
+      }
+      saveAntigravityConfig(cfg);
+    }
+
+    // 5. Cleanup .linked_files.json and symlinks in active skills
+    try {
+      if (fs.existsSync(activeSkillsDir)) {
+        const sEntries = fs.readdirSync(activeSkillsDir, { withFileTypes: true });
+        for (const s of sEntries) {
+          if (s.isDirectory()) {
+            const linkJson = path.join(activeSkillsDir, s.name, '.linked_files.json');
+            if (fs.existsSync(linkJson)) {
+              try { fs.unlinkSync(linkJson); } catch (e) {}
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    removeEmptyDirs(storagePath);
+
+    return { migrated: migratedCount, disabledPlugins };
+  } catch (err) {
+    logDebug(`migrateFromLegacyStorage error: ${err.message}`);
+    return { migrated: 0, error: err.message };
+  }
+}
+
 module.exports = {
   logDebug,
   escapeJsString,
@@ -813,5 +1354,33 @@ module.exports = {
   readPluginInfo,
   readSkillInfo,
   readWorkflowInfo,
-  writePluginMetaField
+  writePluginMetaField,
+  getAntigravityConfigPath,
+  getGlobalPluginsJsonPath,
+  getGlobalSkillsJsonPath,
+  getWorkspacePluginConfigPath,
+  getWorkspaceSkillConfigPath,
+  getAntigravityConfig,
+  saveAntigravityConfig,
+  setAntigravityPluginEnabled,
+  removeAntigravityPluginFromConfig,
+  setPluginManifestDisabled,
+  isAntigravityPluginGloballyEnabled,
+  normalizePathSeparators,
+  resolveJsonConfigPath,
+  formatPathForConfig,
+  readJsonConfigFile,
+  writeJsonConfigFile,
+  isPatternMatch,
+  addEntryToJsonConfig,
+  removeEntryFromJsonConfig,
+  addExcludeToJsonConfig,
+  removeExcludeFromJsonConfig,
+  isPathInJsonConfigEntries,
+  isNameExcludedInJsonConfig,
+  touchAntigravityConfigs,
+  ensureDefaultPluginsFolderInGlobalConfig,
+  cleanupDefaultPluginsFolderInGlobalConfig,
+  migrateFromLegacyStorage
 };
+

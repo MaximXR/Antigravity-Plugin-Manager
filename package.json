@@ -2,7 +2,7 @@
   "name": "antigravity-plugin-manager",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.0.8",
+  "version": "1.2.17",
   "publisher": "MaximXR",
   "license": "MIT",
   "repository": {
@@ -25,7 +25,7 @@
     "context-management"
   ],
   "activationEvents": [
-    "*"
+    "onStartupFinished"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -37,17 +37,49 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "antigravity-plugin-manager.softApply",
+        "title": "%command.softApply%",
+        "category": "Antigravity",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "antigravity-plugin-manager.openConfigJson",
+        "title": "%command.openConfigJson%",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravity-plugin-manager.openPluginsJson",
+        "title": "%command.openPluginsJson%",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravity-plugin-manager.openSkillsJson",
+        "title": "%command.openSkillsJson%",
+        "category": "Antigravity"
+      },
+      {
         "command": "antigravity-plugin-manager.selectStorage",
         "title": "%command.selectStorage%",
         "category": "Antigravity"
+      },
+      {
+        "command": "antigravity-plugin-manager.checkUpdates",
+        "title": "%command.checkUpdates%",
+        "category": "Antigravity",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "antigravity-plugin-manager.softApply",
+          "when": "view == antigravity-plugin-manager.view",
+          "group": "navigation@1"
+        },
+        {
           "command": "antigravity-plugin-manager.refresh",
           "when": "view == antigravity-plugin-manager.view",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ]
     },
@@ -90,6 +122,80 @@
             "auto": "Default (Auto)",
             "en": "English",
             "ru": "Русский"
+          }
+        },
+        "antigravity-plugin-manager.editorOpenColumn": {
+          "type": "string",
+          "enum": [
+            "active",
+            "beside"
+          ],
+          "default": "active",
+          "description": "%config.editorOpenColumn.description%"
+        },
+        "antigravity-plugin-manager.statusBar.showSkills": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.statusBar.showSkills.description%"
+        },
+        "antigravity-plugin-manager.statusBar.showRules": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.statusBar.showRules.description%"
+        },
+        "antigravity-plugin-manager.statusBar.format": {
+          "type": "string",
+          "enum": [
+            "icons",
+            "detailed",
+            "compact"
+          ],
+          "default": "icons",
+          "description": "%config.statusBar.format.description%",
+          "enumItemLabels": {
+            "icons": "Icons only ($(extensions) 1/7 | 📖 12/57 | 📜 3/5)",
+            "detailed": "Full text (Plugins: 1/7 | Skills: 12/57 | Rules: 3/5)",
+            "compact": "Numbers only (1/7 | 12/57 | 3/5)"
+          }
+        },
+        "antigravity-plugin-manager.statusBar.iconSet": {
+          "type": "string",
+          "enum": [
+            "extensions_book",
+            "extensions_tabs",
+            "extensions_notebook",
+            "codicons",
+            "plug_book",
+            "puzzle_lightbulb"
+          ],
+          "default": "extensions_book",
+          "description": "%config.statusBar.iconSet.description%",
+          "enumItemLabels": {
+            "extensions_book": "$(extensions) Plugins | 📖 Skills (Book) | 📜 Rules",
+            "extensions_tabs": "$(extensions) Plugins | 📑 Skills (Tabs/Docs) | 📜 Rules",
+            "extensions_notebook": "$(extensions) Plugins | 📓 Skills (Notebook) | 📜 Rules",
+            "codicons": "$(extensions) Plugins | $(book) Skills | $(law) Rules",
+            "plug_book": "🔌 Plugins | 📖 Skills | 📜 Rules",
+            "puzzle_lightbulb": "🧩 Plugins | 💡 Skills | 📜 Rules"
+          }
+        },
+        "antigravity-plugin-manager.updates.autoCheck": {
+          "type": "string",
+          "enum": [
+            "startup",
+            "hourly",
+            "daily",
+            "weekly",
+            "never"
+          ],
+          "default": "daily",
+          "description": "%config.updates.autoCheck.description%",
+          "enumItemLabels": {
+            "startup": "On Startup",
+            "hourly": "Every hour",
+            "daily": "Once a day",
+            "weekly": "Once a week",
+            "never": "Disabled (Manual only)"
           }
         }
       }

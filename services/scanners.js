@@ -12,178 +12,185 @@ const {
   readSkillInfo,
   readWorkflowInfo,
   getBuiltinPath,
-  getAntigravityIdePath
+  getAntigravityIdePath,
+  getActivePluginsPath,
+  getGlobalPluginsJsonPath,
+  getGlobalSkillsJsonPath,
+  getWorkspacePluginConfigPath,
+  getWorkspaceSkillConfigPath,
+  readJsonConfigFile,
+  resolveJsonConfigPath,
+  isPatternMatch,
+  isAntigravityPluginGloballyEnabled,
+  isPathInJsonConfigEntries,
+  isNameExcludedInJsonConfig
 } = require('./fsUtils');
 
-// Scan conflicts between active and storage folders
-function scanConflicts(activePath, storagePath, category) {
-  const conflicts = [];
-  if (!fs.existsSync(activePath) || !fs.existsSync(storagePath)) return conflicts;
+// Scan conflicts between active and storage folders (legacy stub, no storage conflicts in native mode)
+function scanConflicts() {
+  return [];
+}
+
+function attachPluginActivationState(p, workspaceRoots = []) {
+  const pluginDirName = p.rawId || p.id || path.basename(p.physicalPath);
+  
+  // 1. Antigravity IDE state: plugin.json's disabled field is the primary source of truth
+  const isManifestDisabled = p.disabled === true;
+
+  // Global exclude list in ~/.gemini/config/plugins.json
+  const globalPluginsJson = getGlobalPluginsJsonPath();
+  const isGloballyExcluded = isNameExcludedInJsonConfig(globalPluginsJson, pluginDirName, p.physicalPath) ||
+                             (p.name && isNameExcludedInJsonConfig(globalPluginsJson, p.name, p.physicalPath)) ||
+                             (p.id && isNameExcludedInJsonConfig(globalPluginsJson, p.id, p.physicalPath));
+
+  const isGloballyEnabled = !isManifestDisabled && !isGloballyExcluded;
+  p.isGloballyEnabled = isGloballyEnabled;
+
+  // 2. Workspace project state from .agents/plugins.json
+  let isEnabledForProject = false;
+  let isExcludedInProject = false;
+  let matchingWorkspace = null;
+
+  const roots = Array.isArray(workspaceRoots) ? workspaceRoots : [];
+  if (roots.length > 0) {
+    for (const wsRoot of roots) {
+      const wsConfigPath = getWorkspacePluginConfigPath(wsRoot);
+      const wsRootConfigPath = path.join(wsRoot, 'plugins.json');
+      
+      const inEntries = isPathInJsonConfigEntries(wsConfigPath, p.physicalPath, pluginDirName) ||
+                        isPathInJsonConfigEntries(wsRootConfigPath, p.physicalPath, pluginDirName);
+      const isExcl = isNameExcludedInJsonConfig(wsConfigPath, pluginDirName, p.physicalPath) ||
+                     isNameExcludedInJsonConfig(wsRootConfigPath, pluginDirName, p.physicalPath);
+
+      if (inEntries) {
+        isEnabledForProject = true;
+        matchingWorkspace = path.basename(wsRoot);
+      }
+      if (isExcl) {
+        isExcludedInProject = true;
+      }
+    }
+  }
+
+  p.isEnabledForProject = isEnabledForProject;
+  p.isExcludedInProject = isExcludedInProject;
+  p.projectWorkspaceName = matchingWorkspace;
+  p.projectActive = isEnabledForProject ? true : (isExcludedInProject ? false : null);
+  p.projectOverride = isEnabledForProject ? 'enabled' : (isExcludedInProject ? 'disabled' : 'none');
+
+  // Local plugins inside workspace are active by default unless disabled or excluded
+  if (p.isLocal) {
+    p.isEnabled = !isExcludedInProject && !isManifestDisabled;
+  } else if (isEnabledForProject) {
+    const isDefaultGlobalBlocked = p.source === 'global' && p.isGloballyEnabled === false;
+    p.isEnabled = !isDefaultGlobalBlocked;
+    p.isDefaultGlobalBlocked = isDefaultGlobalBlocked;
+  } else if (isExcludedInProject) {
+    p.isEnabled = false;
+  } else {
+    p.isEnabled = isGloballyEnabled;
+  }
+}
+
+function scanPluginsInDirectory(dirPath, source, sourceLabel, workspaceRoots = [], isLocal = false, workspaceName = '', includeOnly = null, exclude = null) {
+  const plugins = [];
+  if (!fs.existsSync(dirPath)) return plugins;
 
   try {
-    const activeItems = fs.readdirSync(activePath, { withFileTypes: true });
-    for (const item of activeItems) {
-      const name = item.name;
-      const activeItemPath = path.join(activePath, name);
+    const manifestPath = path.join(dirPath, 'plugin.json');
+    if (fs.existsSync(manifestPath)) {
+      const dirName = path.basename(dirPath);
+      if (isPatternMatch(dirName, exclude)) return plugins;
+      if (includeOnly && includeOnly.length > 0 && !isPatternMatch(dirName, includeOnly)) return plugins;
 
-      // Ignore if active item is a symlink or directory junction
-      try {
-        const lstatActive = fs.lstatSync(activeItemPath);
-        if (lstatActive.isSymbolicLink()) {
-          continue;
-        }
-      } catch (e) {}
+      const pInfo = readPluginInfo(dirPath);
+      pInfo.id = isLocal ? `local-${workspaceName}-${dirName}` : dirName;
+      pInfo.rawId = dirName;
+      pInfo.physicalPath = dirPath;
+      pInfo.isLocal = isLocal;
+      pInfo.workspaceName = workspaceName;
+      pInfo.source = source;
+      pInfo.sourceLabel = sourceLabel;
+      attachPluginActivationState(pInfo, workspaceRoots);
+      plugins.push(pInfo);
+      return plugins;
+    }
 
-      const storageItemPath = path.join(storagePath, name);
-      
-      // Ignore if storage item is a symlink or directory junction (means it is active and linked to activePath)
-      try {
-        const lstatStorage = fs.lstatSync(storageItemPath);
-        if (lstatStorage.isSymbolicLink()) {
-          continue;
-        }
-      } catch (e) {}
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const item of items) {
+      if (item.isDirectory()) {
+        if (isPatternMatch(item.name, exclude)) continue;
+        if (includeOnly && includeOnly.length > 0 && !isPatternMatch(item.name, includeOnly)) continue;
 
-      let existsInStorage = false;
-      try {
-        existsInStorage = fs.existsSync(storageItemPath);
-      } catch (e) {}
-      if (existsInStorage) {
-        let isIdentical = false;
-        const stat = fs.statSync(activeItemPath);
-        if (stat.isDirectory()) {
-          isIdentical = areDirsIdentical(activeItemPath, storageItemPath);
-        } else {
-          isIdentical = areFilesIdentical(activeItemPath, storageItemPath);
+        const pDir = path.join(dirPath, item.name);
+        if (fs.existsSync(path.join(pDir, 'plugin.json'))) {
+          const pInfo = readPluginInfo(pDir);
+          pInfo.id = isLocal ? `local-${workspaceName}-${item.name}` : item.name;
+          pInfo.rawId = item.name;
+          pInfo.physicalPath = pDir;
+          pInfo.isLocal = isLocal;
+          pInfo.workspaceName = workspaceName;
+          pInfo.source = source;
+          pInfo.sourceLabel = sourceLabel;
+          attachPluginActivationState(pInfo, workspaceRoots);
+          plugins.push(pInfo);
         }
-        
-        if (isIdentical) {
-          continue;
-        }
-
-        conflicts.push({
-          id: name,
-          category: category,
-          isDir: stat.isDirectory(),
-          isIdentical: isIdentical,
-          activePath: activeItemPath,
-          storagePath: storageItemPath
-        });
       }
     }
   } catch (e) {
-    logDebug(`Error scanning conflicts for ${category}: ${e.message}`);
+    logDebug(`Error scanning plugins in ${dirPath}: ${e.message}`);
   }
-  return conflicts;
+  return plugins;
 }
 
-// Scan global plugins
-function scanPlugins(activePath, storagePath) {
+// Scan global plugins: ~/.gemini/config/plugins and declared in ~/.gemini/config/plugins.json
+function scanPlugins(activePath, workspaceRoots = []) {
+  activePath = activePath || getActivePluginsPath();
   const plugins = [];
-  const seenIds = new Set();
+  const seenPaths = new Set();
 
-  logDebug(`scanPlugins: activePath=${activePath}, storagePath=${storagePath}`);
+  logDebug(`scanPlugins: activePath=${activePath}`);
 
-  // 1. Scan storage folder (disabled plugins)
-  if (fs.existsSync(storagePath)) {
-    try {
-      const items = fs.readdirSync(storagePath, { withFileTypes: true });
-      for (const item of items) {
-        if (item.isDirectory()) {
-          const pluginDir = path.join(storagePath, item.name);
-          
-          let isSymlink = false;
-          try {
-            const lstat = fs.lstatSync(pluginDir);
-            isSymlink = lstat.isSymbolicLink();
-          } catch (e) {}
-
-          if (isSymlink) {
-            logDebug(`Skipping junction in storage: ${pluginDir} (it points to active)`);
-            continue;
-          }
-
-          const pluginInfo = readPluginInfo(pluginDir);
-          pluginInfo.id = item.name;
-          pluginInfo.isEnabled = false;
-          pluginInfo.physicalPath = pluginDir;
-          plugins.push(pluginInfo);
-          seenIds.add(item.name);
-        }
-      }
-    } catch (e) {
-      logDebug(`Error scanning storage plugins: ${e.message}`);
-    }
-  }
-
-  // Check backwards compatibility with storage root folder
-  const legacyStorageRoot = path.dirname(storagePath);
-  if (fs.existsSync(legacyStorageRoot)) {
-    try {
-      const legacyItems = fs.readdirSync(legacyStorageRoot, { withFileTypes: true });
-      for (const item of legacyItems) {
-        if (item.isDirectory() && item.name !== 'plugins' && item.name !== 'skills' && item.name !== 'workflows' && !seenIds.has(item.name)) {
-          const pluginDir = path.join(legacyStorageRoot, item.name);
-          const pluginJsonPath = path.join(pluginDir, 'plugin.json');
-          if (fs.existsSync(pluginJsonPath)) {
-            let isSymlink = false;
-            try {
-              const lstat = fs.lstatSync(pluginDir);
-              isSymlink = lstat.isSymbolicLink();
-            } catch (e) {}
-
-            if (!isSymlink) {
-              const pluginInfo = readPluginInfo(pluginDir);
-              pluginInfo.id = item.name;
-              pluginInfo.isEnabled = false;
-              pluginInfo.physicalPath = pluginDir;
-              plugins.push(pluginInfo);
-              seenIds.add(item.name);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      logDebug(`Error scanning legacy storage plugins: ${e.message}`);
-    }
-  }
-
-  // Create active path if it doesn't exist
+  // 1. Scan default active folder
   if (!fs.existsSync(activePath)) {
-    try {
-      fs.mkdirSync(activePath, { recursive: true });
-    } catch (e) {}
+    try { fs.mkdirSync(activePath, { recursive: true }); } catch (e) {}
   }
 
-  // 2. Scan active folder (enabled plugins)
-  if (fs.existsSync(activePath)) {
-    try {
-      const items = fs.readdirSync(activePath, { withFileTypes: true });
-      for (const item of items) {
-        const activeItemPath = path.join(activePath, item.name);
-        
-        let isDir = false;
-        try {
-          isDir = fs.statSync(activeItemPath).isDirectory();
-        } catch (e) {}
+  const defaultPlugins = scanPluginsInDirectory(activePath, 'global', 'Global', workspaceRoots, false, '');
+  for (const p of defaultPlugins) {
+    const norm = path.normalize(p.physicalPath).toLowerCase();
+    if (!seenPaths.has(norm)) {
+      seenPaths.add(norm);
+      plugins.push(p);
+    }
+  }
 
-        if (isDir) {
-          const pluginInfo = readPluginInfo(activeItemPath);
-          pluginInfo.id = item.name;
-          pluginInfo.isEnabled = true;
-          pluginInfo.physicalPath = activeItemPath;
+  // 2. Scan external plugins from ~/.gemini/config/plugins.json
+  const globalPluginsJson = getGlobalPluginsJsonPath();
+  if (fs.existsSync(globalPluginsJson)) {
+    const configData = readJsonConfigFile(globalPluginsJson);
+    const entries = configData.entries || [];
+    const topExclude = configData.exclude || [];
+    const topIncludeOnly = configData.include_only || [];
 
-          const idx = plugins.findIndex(p => p.id === item.name);
-          if (idx !== -1) {
-            plugins[idx] = pluginInfo;
-          } else {
-            plugins.push(pluginInfo);
-          }
-          seenIds.add(item.name);
+    for (const entry of entries) {
+      const rawPath = typeof entry === 'string' ? entry : entry.path;
+      if (!rawPath) continue;
+
+      const resolved = resolveJsonConfigPath(rawPath, path.dirname(globalPluginsJson));
+      if (!fs.existsSync(resolved)) continue;
+
+      const entryIncludeOnly = entry.include_only || (topIncludeOnly.length > 0 ? topIncludeOnly : null);
+      const label = `plugins.json (${path.basename(resolved)})`;
+
+      const found = scanPluginsInDirectory(resolved, 'configured', label, workspaceRoots, false, '', entryIncludeOnly, topExclude);
+      for (const p of found) {
+        const norm = path.normalize(p.physicalPath).toLowerCase();
+        if (!seenPaths.has(norm)) {
+          seenPaths.add(norm);
+          plugins.push(p);
         }
       }
-    } catch (e) {
-      logDebug(`Error scanning active plugins: ${e.message}`);
     }
   }
 
@@ -191,102 +198,219 @@ function scanPlugins(activePath, storagePath) {
   return plugins;
 }
 
-// Scan local workspace plugins
-function scanLocalPlugins() {
+// Scan local workspace plugins: <wsRoot>/.agents/plugins/ and declared in <wsRoot>/.agents/plugins.json
+function scanLocalPlugins(workspaceRoots = [], seenPaths = new Set()) {
   const localPlugins = [];
-  if (!vscode.workspace.workspaceFolders) return localPlugins;
-  
-  for (const folder of vscode.workspace.workspaceFolders) {
-    const wsRoot = folder.uri.fsPath;
+  if (!workspaceRoots || workspaceRoots.length === 0) return localPlugins;
+
+  for (const wsRoot of workspaceRoots) {
+    const wsName = path.basename(wsRoot);
     const wsPluginsPath = path.join(wsRoot, '.agents', 'plugins');
+
+    // 1. Default .agents/plugins folder
     if (fs.existsSync(wsPluginsPath)) {
-      try {
-        const items = fs.readdirSync(wsPluginsPath, { withFileTypes: true });
-        for (const item of items) {
-          if (item.isDirectory()) {
-            const pluginDir = path.join(wsPluginsPath, item.name);
-            const pluginInfo = readPluginInfo(pluginDir);
-            pluginInfo.id = `local-${folder.name}-${item.name}`;
-            pluginInfo.isEnabled = true;
-            pluginInfo.isLocal = true;
-            pluginInfo.workspaceName = folder.name;
-            pluginInfo.physicalPath = pluginDir;
-            localPlugins.push(pluginInfo);
+      const found = scanPluginsInDirectory(wsPluginsPath, 'workspace', wsName, workspaceRoots, true, wsName);
+      for (const p of found) {
+        const norm = path.normalize(p.physicalPath).toLowerCase();
+        if (!seenPaths.has(norm)) {
+          seenPaths.add(norm);
+          localPlugins.push(p);
+        }
+      }
+    }
+
+    // 2. Custom entries in .agents/plugins.json
+    const wsPluginsJson = getWorkspacePluginConfigPath(wsRoot);
+    if (fs.existsSync(wsPluginsJson)) {
+      const configData = readJsonConfigFile(wsPluginsJson);
+      for (const entry of configData.entries || []) {
+        const rawPath = typeof entry === 'string' ? entry : entry.path;
+        if (!rawPath) continue;
+        const resolved = resolveJsonConfigPath(rawPath, wsRoot);
+        if (!fs.existsSync(resolved)) continue;
+
+        const norm = path.normalize(resolved).toLowerCase();
+        if (seenPaths.has(norm)) {
+          continue; // Already scanned as global or earlier plugin!
+        }
+
+        // If plugin is inside workspace, consider it local; otherwise it's an imported plugin
+        const isUnderWs = !path.relative(wsRoot, resolved).startsWith('..') && !path.isAbsolute(path.relative(wsRoot, resolved));
+        const label = `${wsName} (plugins.json)`;
+        const found = scanPluginsInDirectory(resolved, isUnderWs ? 'workspace' : 'imported', label, workspaceRoots, isUnderWs, wsName, entry.include_only);
+        for (const p of found) {
+          const pNorm = path.normalize(p.physicalPath).toLowerCase();
+          if (!seenPaths.has(pNorm)) {
+            seenPaths.add(pNorm);
+            localPlugins.push(p);
           }
         }
-      } catch (e) {
-        logDebug(`Error scanning local plugins in ${folder.name}: ${e.message}`);
       }
     }
   }
   return localPlugins;
 }
 
-// Scan global skills
-function scanSkills(activePath, storagePath) {
-  const skills = [];
-  const seenNames = new Set();
+function attachSkillActivationState(s, workspaceRoots = []) {
+  const skillDirName = s.rawId || s.id || path.basename(s.physicalPath);
+  const skillName = s.name || skillDirName;
+  const globalSkillsJson = getGlobalSkillsJsonPath();
 
-  logDebug(`scanSkills: activePath=${activePath}, storagePath=${storagePath}`);
+  // 1. Global state from global skills.json exclude list
+  const isGloballyExcluded = isNameExcludedInJsonConfig(globalSkillsJson, skillDirName, s.physicalPath) ||
+                             isNameExcludedInJsonConfig(globalSkillsJson, skillName, s.physicalPath) ||
+                             isNameExcludedInJsonConfig(globalSkillsJson, s.id, s.physicalPath);
+  s.isGloballyExcluded = isGloballyExcluded;
+  s.isGloballyEnabled = !isGloballyExcluded;
 
-  // 1. Scan storage folder (disabled skills)
-  if (fs.existsSync(storagePath)) {
-    try {
-      const items = fs.readdirSync(storagePath, { withFileTypes: true });
-      for (const item of items) {
-        if (item.isDirectory()) {
-          const skillDir = path.join(storagePath, item.name);
-          if (getSkillMdPath(skillDir)) {
-            const skillInfo = readSkillInfo(skillDir);
-            skillInfo.id = item.name;
-            skillInfo.isEnabled = false;
-            skillInfo.physicalPath = skillDir;
-            skills.push(skillInfo);
-            seenNames.add(item.name);
-          }
-        }
+  // 2. Workspace project state
+  let isEnabledForProject = false;
+  let isExcludedInProject = false;
+  let matchingWorkspace = null;
+
+  if (workspaceRoots && workspaceRoots.length > 0) {
+    for (const wsRoot of workspaceRoots) {
+      const wsConfigPath = getWorkspaceSkillConfigPath(wsRoot);
+      const wsRootConfigPath = path.join(wsRoot, 'skills.json');
+
+      const inEntries = isPathInJsonConfigEntries(wsConfigPath, s.physicalPath, skillDirName) ||
+                        isPathInJsonConfigEntries(wsConfigPath, s.physicalPath, skillName) ||
+                        isPathInJsonConfigEntries(wsRootConfigPath, s.physicalPath, skillDirName) ||
+                        isPathInJsonConfigEntries(wsRootConfigPath, s.physicalPath, skillName);
+      const isExcl = isNameExcludedInJsonConfig(wsConfigPath, skillDirName) ||
+                     isNameExcludedInJsonConfig(wsConfigPath, skillName) ||
+                     isNameExcludedInJsonConfig(wsRootConfigPath, skillDirName) ||
+                     isNameExcludedInJsonConfig(wsRootConfigPath, skillName);
+
+      if (inEntries) {
+        isEnabledForProject = true;
+        matchingWorkspace = path.basename(wsRoot);
       }
-    } catch (e) {
-      logDebug(`Error scanning storage skills: ${e.message}`);
+      if (isExcl) {
+        isExcludedInProject = true;
+      }
     }
   }
 
-  // Create active path if it doesn't exist
-  if (!fs.existsSync(activePath)) {
-    try {
-      fs.mkdirSync(activePath, { recursive: true });
-    } catch (e) {}
+  s.isEnabledForProject = isEnabledForProject;
+  s.isExcludedInProject = isExcludedInProject;
+  s.projectWorkspaceName = matchingWorkspace;
+  s.isProjectExcluded = isExcludedInProject;
+  s.isProjectExplicit = isEnabledForProject;
+  s.projectActive = isEnabledForProject ? true : (isExcludedInProject ? false : null);
+  s.projectOverride = isEnabledForProject ? 'enabled' : (isExcludedInProject ? 'disabled' : 'none');
+
+  if (s.isLocal) {
+    s.isEnabled = !isExcludedInProject;
+  } else if (isEnabledForProject) {
+    const isDefaultGlobalBlocked = s.source === 'global' && s.isGloballyEnabled === false;
+    s.isEnabled = !isDefaultGlobalBlocked;
+    s.isDefaultGlobalBlocked = isDefaultGlobalBlocked;
+  } else if (isExcludedInProject) {
+    s.isEnabled = false; // Excluded in project configuration
+  } else {
+    s.isEnabled = s.isGloballyEnabled;
   }
+}
 
-  // 2. Scan active folder (enabled skills)
-  if (fs.existsSync(activePath)) {
-    try {
-      const items = fs.readdirSync(activePath, { withFileTypes: true });
-      for (const item of items) {
-        const activeItemPath = path.join(activePath, item.name);
-        
-        let isDir = false;
-        try {
-          isDir = fs.statSync(activeItemPath).isDirectory();
-        } catch (e) {}
+function scanSkillsInDirectory(dirPath, source, sourceLabel, workspaceRoots = [], isLocal = false, workspaceName = '', includeOnly = null, exclude = null) {
+  const skills = [];
+  if (!fs.existsSync(dirPath)) return skills;
 
-        if (isDir && getSkillMdPath(activeItemPath)) {
-          const skillInfo = readSkillInfo(activeItemPath);
-          skillInfo.id = item.name;
-          skillInfo.isEnabled = true;
-          skillInfo.physicalPath = activeItemPath;
+  try {
+    const selfSkillMd = getSkillMdPath(dirPath);
+    if (selfSkillMd) {
+      const dirName = path.basename(dirPath);
+      if (isPatternMatch(dirName, exclude)) return skills;
+      if (includeOnly && includeOnly.length > 0 && !isPatternMatch(dirName, includeOnly)) return skills;
 
-          const idx = skills.findIndex(s => s.id === item.name);
-          if (idx !== -1) {
-            skills[idx] = skillInfo;
-          } else {
-            skills.push(skillInfo);
-          }
-          seenNames.add(item.name);
+      const sInfo = readSkillInfo(dirPath);
+      sInfo.id = isLocal ? `local-${workspaceName}-${dirName}` : dirName;
+      sInfo.rawId = dirName;
+      sInfo.physicalPath = dirPath;
+      sInfo.isLocal = isLocal;
+      sInfo.workspaceName = workspaceName;
+      sInfo.source = source;
+      sInfo.sourceLabel = sourceLabel;
+      attachSkillActivationState(sInfo, workspaceRoots);
+      skills.push(sInfo);
+      return skills;
+    }
+
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const item of items) {
+      if (item.isDirectory()) {
+        if (isPatternMatch(item.name, exclude)) continue;
+        if (includeOnly && includeOnly.length > 0 && !isPatternMatch(item.name, includeOnly)) continue;
+
+        const sDir = path.join(dirPath, item.name);
+        if (getSkillMdPath(sDir)) {
+          const sInfo = readSkillInfo(sDir);
+          sInfo.id = isLocal ? `local-${workspaceName}-${item.name}` : item.name;
+          sInfo.rawId = item.name;
+          sInfo.physicalPath = sDir;
+          sInfo.isLocal = isLocal;
+          sInfo.workspaceName = workspaceName;
+          sInfo.source = source;
+          sInfo.sourceLabel = sourceLabel;
+          attachSkillActivationState(sInfo, workspaceRoots);
+          skills.push(sInfo);
         }
       }
-    } catch (e) {
-      logDebug(`Error scanning active skills: ${e.message}`);
+    }
+  } catch (e) {
+    logDebug(`Error scanning skills in ${dirPath}: ${e.message}`);
+  }
+  return skills;
+}
+
+// Scan global skills: ~/.gemini/config/skills and declared in ~/.gemini/config/skills.json
+function scanSkills(activePath, workspaceRoots = []) {
+  const skills = [];
+  const seenPaths = new Set();
+
+  logDebug(`scanSkills: activePath=${activePath}`);
+
+  if (!fs.existsSync(activePath)) {
+    try { fs.mkdirSync(activePath, { recursive: true }); } catch (e) {}
+  }
+
+  // 1. Scan default active skills folder
+  const defaultSkills = scanSkillsInDirectory(activePath, 'global', 'Global', workspaceRoots, false, '');
+  for (const s of defaultSkills) {
+    const norm = path.normalize(s.physicalPath).toLowerCase();
+    if (!seenPaths.has(norm)) {
+      seenPaths.add(norm);
+      skills.push(s);
+    }
+  }
+
+  // 2. Scan external skills from ~/.gemini/config/skills.json
+  const globalSkillsJson = getGlobalSkillsJsonPath();
+  if (fs.existsSync(globalSkillsJson)) {
+    const configData = readJsonConfigFile(globalSkillsJson);
+    const entries = configData.entries || [];
+    const topExclude = configData.exclude || [];
+    const topIncludeOnly = configData.include_only || [];
+
+    for (const entry of entries) {
+      const rawPath = typeof entry === 'string' ? entry : entry.path;
+      if (!rawPath) continue;
+
+      const resolved = resolveJsonConfigPath(rawPath, path.dirname(globalSkillsJson));
+      if (!fs.existsSync(resolved)) continue;
+
+      const entryIncludeOnly = entry.include_only || (topIncludeOnly.length > 0 ? topIncludeOnly : null);
+      const label = `skills.json (${path.basename(resolved)})`;
+
+      const found = scanSkillsInDirectory(resolved, 'configured', label, workspaceRoots, false, '', entryIncludeOnly);
+      for (const s of found) {
+        const norm = path.normalize(s.physicalPath).toLowerCase();
+        if (!seenPaths.has(norm)) {
+          seenPaths.add(norm);
+          skills.push(s);
+        }
+      }
     }
   }
 
@@ -294,33 +418,52 @@ function scanSkills(activePath, storagePath) {
   return skills;
 }
 
-// Scan local workspace skills
-function scanLocalSkills() {
+// Scan local workspace skills: <wsRoot>/.agents/skills/ and declared in <wsRoot>/.agents/skills.json
+function scanLocalSkills(workspaceRoots = [], seenPaths = new Set()) {
   const localSkills = [];
-  if (!vscode.workspace.workspaceFolders) return localSkills;
-  
-  for (const folder of vscode.workspace.workspaceFolders) {
-    const wsRoot = folder.uri.fsPath;
+  if (!workspaceRoots || workspaceRoots.length === 0) return localSkills;
+
+  for (const wsRoot of workspaceRoots) {
+    const wsName = path.basename(wsRoot);
     const wsSkillsPath = path.join(wsRoot, '.agents', 'skills');
+
+    // 1. Default .agents/skills
     if (fs.existsSync(wsSkillsPath)) {
-      try {
-        const items = fs.readdirSync(wsSkillsPath, { withFileTypes: true });
-        for (const item of items) {
-          if (item.isDirectory()) {
-            const skillDir = path.join(wsSkillsPath, item.name);
-            if (getSkillMdPath(skillDir)) {
-              const skillInfo = readSkillInfo(skillDir);
-              skillInfo.id = `local-${folder.name}-${item.name}`;
-              skillInfo.isEnabled = true;
-              skillInfo.isLocal = true;
-              skillInfo.workspaceName = folder.name;
-              skillInfo.physicalPath = skillDir;
-              localSkills.push(skillInfo);
-            }
+      const found = scanSkillsInDirectory(wsSkillsPath, 'workspace', wsName, workspaceRoots, true, wsName);
+      for (const s of found) {
+        const norm = path.normalize(s.physicalPath).toLowerCase();
+        if (!seenPaths.has(norm)) {
+          seenPaths.add(norm);
+          localSkills.push(s);
+        }
+      }
+    }
+
+    // 2. Custom entries in .agents/skills.json
+    const wsSkillsJson = getWorkspaceSkillConfigPath(wsRoot);
+    if (fs.existsSync(wsSkillsJson)) {
+      const configData = readJsonConfigFile(wsSkillsJson);
+      for (const entry of configData.entries || []) {
+        const rawPath = typeof entry === 'string' ? entry : entry.path;
+        if (!rawPath) continue;
+        const resolved = resolveJsonConfigPath(rawPath, wsRoot);
+        if (!fs.existsSync(resolved)) continue;
+
+        const norm = path.normalize(resolved).toLowerCase();
+        if (seenPaths.has(norm)) {
+          continue; // Already scanned as global or builtin!
+        }
+
+        const isUnderWs = !path.relative(wsRoot, resolved).startsWith('..') && !path.isAbsolute(path.relative(wsRoot, resolved));
+        const label = `${wsName} (skills.json)`;
+        const found = scanSkillsInDirectory(resolved, isUnderWs ? 'workspace' : 'imported', label, workspaceRoots, isUnderWs, wsName, entry.include_only);
+        for (const s of found) {
+          const sNorm = path.normalize(s.physicalPath).toLowerCase();
+          if (!seenPaths.has(sNorm)) {
+            seenPaths.add(sNorm);
+            localSkills.push(s);
           }
         }
-      } catch (e) {
-        logDebug(`Error scanning local skills in ${folder.name}: ${e.message}`);
       }
     }
   }
@@ -360,69 +503,29 @@ function scanBuiltinSkills() {
 }
 
 // Scan global workflows
-function scanWorkflows(activePath, storagePath) {
+function scanWorkflows(activePath) {
   const workflows = [];
-  const seenNames = new Set();
+  logDebug(`scanWorkflows: activePath=${activePath}`);
 
-  logDebug(`scanWorkflows: activePath=${activePath}, storagePath=${storagePath}`);
-
-  // 1. Scan storage folder (disabled workflows)
-  if (fs.existsSync(storagePath)) {
-    try {
-      const items = fs.readdirSync(storagePath, { withFileTypes: true });
-      for (const item of items) {
-        if (item.isFile() && item.name.endsWith('.md')) {
-          const workflowFile = path.join(storagePath, item.name);
-          const wfInfo = readWorkflowInfo(workflowFile);
-          wfInfo.id = item.name;
-          wfInfo.isEnabled = false;
-          wfInfo.physicalPath = workflowFile;
-          workflows.push(wfInfo);
-          seenNames.add(item.name);
-        }
-      }
-    } catch (e) {
-      logDebug(`Error scanning storage workflows: ${e.message}`);
-    }
-  }
-
-  // Create active path if it doesn't exist
   if (!fs.existsSync(activePath)) {
-    try {
-      fs.mkdirSync(activePath, { recursive: true });
-    } catch (e) {}
+    try { fs.mkdirSync(activePath, { recursive: true }); } catch (e) {}
+    return workflows;
   }
 
-  // 2. Scan active folder (enabled workflows)
-  if (fs.existsSync(activePath)) {
-    try {
-      const items = fs.readdirSync(activePath, { withFileTypes: true });
-      for (const item of items) {
-        const activeItemPath = path.join(activePath, item.name);
-        
-        let isFile = false;
-        try {
-          isFile = fs.statSync(activeItemPath).isFile();
-        } catch (e) {}
-
-        if (isFile && item.name.endsWith('.md')) {
-          const wfInfo = readWorkflowInfo(activeItemPath);
-          wfInfo.id = item.name;
-          wfInfo.isEnabled = true;
-          wfInfo.physicalPath = activeItemPath;
-
-          const idx = workflows.findIndex(w => w.id === item.name);
-          if (idx !== -1) {
-            workflows[idx] = wfInfo;
-          } else {
-            workflows.push(wfInfo);
-          }
-          seenNames.add(item.name);
-        }
+  try {
+    const items = fs.readdirSync(activePath, { withFileTypes: true });
+    for (const item of items) {
+      const activeItemPath = path.join(activePath, item.name);
+      if (item.isFile() && item.name.endsWith('.md')) {
+        const wfInfo = readWorkflowInfo(activeItemPath);
+        wfInfo.id = item.name;
+        wfInfo.isEnabled = true;
+        wfInfo.physicalPath = activeItemPath;
+        workflows.push(wfInfo);
       }
-    } catch (e) {
-      logDebug(`Error scanning active workflows: ${e.message}`);
     }
+  } catch (e) {
+    logDebug(`Error scanning active workflows: ${e.message}`);
   }
 
   workflows.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -882,6 +985,230 @@ function getContextStats(activePlugins, activeSkills, activeWorkflows, allRules,
   };
 }
 
+// Collect all connected external folders from plugins.json and skills.json (global and workspaces)
+function getConnectedFolders(workspaceRoots = []) {
+  const list = [];
+  const globalPluginsJson = getGlobalPluginsJsonPath();
+  const globalSkillsJson = getGlobalSkillsJsonPath();
+
+  if (fs.existsSync(globalPluginsJson)) {
+    const data = readJsonConfigFile(globalPluginsJson);
+    const normDefault = path.normalize(getActivePluginsPath()).toLowerCase();
+    (data.entries || []).forEach(e => {
+      const p = typeof e === 'string' ? e : e.path;
+      if (p) {
+        const resolved = resolveJsonConfigPath(p, path.dirname(globalPluginsJson));
+        if (path.normalize(resolved).toLowerCase() === normDefault) {
+          // Default global plugins folder is not an external repository chip
+          return;
+        }
+        if (fs.existsSync(path.join(resolved, 'plugin.json')) || fs.existsSync(path.join(resolved, 'SKILL.md'))) {
+          // Individual item override, not a repository folder
+          return;
+        }
+        const fName = path.basename(resolved) || p;
+        list.push({
+          type: 'plugin',
+          category: 'plugins',
+          scope: 'global',
+          sourceFile: globalPluginsJson,
+          configuredPath: p,
+          path: resolved,
+          physicalPath: resolved,
+          exists: fs.existsSync(resolved),
+          label: fName,
+          folderName: fName
+        });
+      }
+    });
+  }
+
+  if (fs.existsSync(globalSkillsJson)) {
+    const data = readJsonConfigFile(globalSkillsJson);
+    (data.entries || []).forEach(e => {
+      const p = typeof e === 'string' ? e : e.path;
+      if (p) {
+        const resolved = resolveJsonConfigPath(p, path.dirname(globalSkillsJson));
+        if (fs.existsSync(path.join(resolved, 'plugin.json')) || fs.existsSync(path.join(resolved, 'SKILL.md'))) {
+          // Individual item override, not a repository folder
+          return;
+        }
+        const fName = path.basename(resolved) || p;
+        list.push({
+          type: 'skill',
+          category: 'skills',
+          scope: 'global',
+          sourceFile: globalSkillsJson,
+          configuredPath: p,
+          path: resolved,
+          physicalPath: resolved,
+          exists: fs.existsSync(resolved),
+          label: fName,
+          folderName: fName
+        });
+      }
+    });
+  }
+
+  if (workspaceRoots && workspaceRoots.length > 0) {
+    for (const wsRoot of workspaceRoots) {
+      const wsName = path.basename(wsRoot);
+      const wsPluginsJson = getWorkspacePluginConfigPath(wsRoot);
+      const wsSkillsJson = getWorkspaceSkillConfigPath(wsRoot);
+
+      if (fs.existsSync(wsPluginsJson)) {
+        const data = readJsonConfigFile(wsPluginsJson);
+        (data.entries || []).forEach(e => {
+          const p = typeof e === 'string' ? e : e.path;
+          if (p) {
+            const resolved = resolveJsonConfigPath(p, wsRoot);
+            if (fs.existsSync(path.join(resolved, 'plugin.json')) || fs.existsSync(path.join(resolved, 'SKILL.md'))) {
+              // Individual item override in workspace, not a repository folder
+              return;
+            }
+            const fName = path.basename(resolved) || p;
+            list.push({
+              type: 'plugin',
+              category: 'plugins',
+              scope: 'workspace',
+              workspaceName: wsName,
+              workspaceRoot: wsRoot,
+              sourceFile: wsPluginsJson,
+              configuredPath: p,
+              path: resolved,
+              physicalPath: resolved,
+              exists: fs.existsSync(resolved),
+              label: `${wsName}: ${fName}`,
+              folderName: fName
+            });
+          }
+        });
+      }
+
+      if (fs.existsSync(wsSkillsJson)) {
+        const data = readJsonConfigFile(wsSkillsJson);
+        (data.entries || []).forEach(e => {
+          const p = typeof e === 'string' ? e : e.path;
+          if (p) {
+            const resolved = resolveJsonConfigPath(p, wsRoot);
+            if (fs.existsSync(path.join(resolved, 'plugin.json')) || fs.existsSync(path.join(resolved, 'SKILL.md'))) {
+              // Individual item override in workspace, not a repository folder
+              return;
+            }
+            const fName = path.basename(resolved) || p;
+            list.push({
+              type: 'skill',
+              category: 'skills',
+              scope: 'workspace',
+              workspaceName: wsName,
+              workspaceRoot: wsRoot,
+              sourceFile: wsSkillsJson,
+              configuredPath: p,
+              path: resolved,
+              physicalPath: resolved,
+              exists: fs.existsSync(resolved),
+              label: `${wsName}: ${fName}`,
+              folderName: fName
+            });
+          }
+        });
+      }
+    }
+  }
+
+  return list;
+}
+
+let _cachedLiveContext = null;
+
+function scanIdeLiveContext(forceRefresh = false) {
+  try {
+    const now = Date.now();
+    if (!forceRefresh && _cachedLiveContext && (now - (_cachedLiveContext.timestamp || 0) < 2000)) {
+      return _cachedLiveContext.result;
+    }
+
+    const candidateDirs = [
+      path.join(os.homedir(), '.gemini', 'antigravity-ide', 'conversations'),
+      path.join(os.homedir(), '.gemini', 'antigravity', 'conversations')
+    ];
+
+    let latestFile = null;
+    let maxMtime = 0;
+
+    for (const convDir of candidateDirs) {
+      if (!fs.existsSync(convDir)) continue;
+      try {
+        const files = fs.readdirSync(convDir);
+        for (const file of files) {
+          if (!file.endsWith('.db')) continue;
+          const fullPath = path.join(convDir, file);
+          try {
+            const stat = fs.statSync(fullPath);
+            if (stat.mtimeMs > maxMtime) {
+              maxMtime = stat.mtimeMs;
+              latestFile = fullPath;
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    if (!latestFile) {
+      return { available: false };
+    }
+
+    if (!forceRefresh && _cachedLiveContext && _cachedLiveContext.dbPath === latestFile && _cachedLiveContext.mtimeMs === maxMtime) {
+      _cachedLiveContext.timestamp = now;
+      return _cachedLiveContext.result;
+    }
+
+    const stat = fs.statSync(latestFile);
+    const readSize = Math.min(stat.size, 4 * 1024 * 1024);
+    let fd = null;
+    let buf = null;
+    try {
+      fd = fs.openSync(latestFile, 'r');
+      buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, Math.max(0, stat.size - readSize));
+    } finally {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch (_) {}
+      }
+    }
+
+    const content = buf ? buf.toString('utf8') : '';
+
+    const pluginMatches = [...content.matchAll(/#\s+([a-zA-Z0-9_-]+)\s+\(file:\/\/\/[^\n\r]*?\/plugins\/([a-zA-Z0-9_-]+)\)/g)];
+    const activePlugins = [...new Set(pluginMatches.map(m => m[1]))];
+
+    const skillMatches = [...content.matchAll(/-\s+([a-zA-Z0-9_-]+)\s+\([^)]*?SKILL\.md\)/g)];
+    const activeSkills = [...new Set(skillMatches.map(m => m[1]))];
+
+    const result = {
+      available: true,
+      dbPath: latestFile,
+      conversationId: path.basename(latestFile, '.db'),
+      updatedAt: maxMtime,
+      activePlugins,
+      skillsCount: activeSkills.length,
+      skillsSample: activeSkills.slice(0, 10)
+    };
+
+    _cachedLiveContext = {
+      dbPath: latestFile,
+      mtimeMs: maxMtime,
+      timestamp: now,
+      result
+    };
+
+    return result;
+  } catch (err) {
+    logDebug(`scanIdeLiveContext error: ${err.message}`);
+    return { available: false, error: err.message };
+  }
+}
+
 module.exports = {
   scanConflicts,
   scanPlugins,
@@ -895,5 +1222,8 @@ module.exports = {
   scanAllRules,
   scanAllMcpServers,
   scanAllHooks,
-  getContextStats
+  getContextStats,
+  getConnectedFolders,
+  scanIdeLiveContext
 };
+

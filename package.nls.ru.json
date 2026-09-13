@@ -1,10 +1,21 @@
 {
   "extension.displayName": "Antigravity Plugin & Skill Manager",
-  "extension.description": "Удобное управление, поиск, редактирование, включение и выключение глобальных плагинов и навыков в Antigravity IDE для оптимизации контекста",
+  "extension.description": "Графическая панель управления плагинами, навыками и правилами в Antigravity IDE. Включение и выключение в 1 клик без ручного копания в .gemini",
   "command.refresh": "Обновить список плагинов",
+  "command.softApply": "Мягко применить / Перезапустить Language Server",
   "command.selectStorage": "Выбрать папку хранилища...",
+  "command.openConfigJson": "Открыть Antigravity config.json",
+  "command.openPluginsJson": "Открыть plugins.json",
+  "command.openSkillsJson": "Открыть skills.json",
+  "command.checkUpdates": "Проверить обновления плагинов на GitHub",
   "viewsContainers.activitybar.title": "🧩 Плагины",
   "views.plugin-manager.name": "Менеджер плагинов",
   "config.storagePath.description": "Пользовательский абсолютный путь к папке хранения глобальных плагинов",
-  "config.language.description": "Язык интерфейса (auto: системный язык по умолчанию, либо ручной выбор)"
+  "config.language.description": "Язык интерфейса (auto: системный язык по умолчанию, либо ручной выбор)",
+  "config.editorOpenColumn.description": "В какой области открывать файлы ресурсов: во вкладке рядом с менеджером (active) или в отдельной параллельной панели (beside)",
+  "config.statusBar.showSkills.description": "Показывать количество активных и доступных навыков в статус-баре",
+  "config.statusBar.showRules.description": "Показывать количество активных и доступных правил в статус-баре",
+  "config.statusBar.format.description": "Формат отображения в статус-баре: только иконки ($(extensions) 1/7 | 📖 12/57 | 📜 3/5), полные слова (Plugins: 1/7 | Skills: 12/57 | Rules: 3/5) или только цифры (1/7 | 12/57 | 3/5)",
+  "config.statusBar.iconSet.description": "Набор иконок для отображения в статус-баре: иконка расширений $(extensions) + раскрытая книга 📖, документ с закладками 📑, блокнот 📓, нативные кодиконки VS Code, розетка 🔌, или пазл 🧩",
+  "config.updates.autoCheck.description": "Как часто автоматически проверять обновления плагинов на GitHub (startup: при старте, hourly: каждый час, daily: раз в день, weekly: раз в неделю, never: никогда)"
 }

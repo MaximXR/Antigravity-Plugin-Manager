@@ -1,10 +1,21 @@
 {
   "extension.displayName": "Antigravity Plugin & Skill Manager",
-  "extension.description": "Convenient tool to search, edit, enable, and disable global plugins and skills in Antigravity IDE, optimizing the active context",
+  "extension.description": "Visual control panel for plugins, skills, and rules in Antigravity IDE. Toggle customizations in 1 click without digging through .gemini",
   "command.refresh": "Refresh Plugin List",
+  "command.softApply": "Soft Apply / Restart Language Server",
   "command.selectStorage": "Select Storage Folder...",
+  "command.openConfigJson": "Open Antigravity config.json",
+  "command.openPluginsJson": "Open plugins.json",
+  "command.openSkillsJson": "Open skills.json",
+  "command.checkUpdates": "Check Plugin Updates from GitHub",
   "viewsContainers.activitybar.title": "🧩 Plugins",
   "views.plugin-manager.name": "Plugin Manager",
   "config.storagePath.description": "Custom absolute path for global plugins storage directory",
-  "config.language.description": "Interface language (auto: default system language, or choose manual)"
+  "config.language.description": "Interface language (auto: default system language, or choose manual)",
+  "config.editorOpenColumn.description": "Where to open resource files: in a tab alongside the manager (active) or in a split side pane (beside)",
+  "config.statusBar.showSkills.description": "Display active and total skill counts in the status bar",
+  "config.statusBar.showRules.description": "Display active and total rule counts in the status bar",
+  "config.statusBar.format.description": "Status bar display format: icons only ($(extensions) 1/7 | 📖 12/57 | 📜 3/5), full text (Plugins: 1/7 | Skills: 12/57 | Rules: 3/5), or compact numbers (1/7 | 12/57 | 3/5)",
+  "config.statusBar.iconSet.description": "Icon set used in the status bar: extensions icon $(extensions) + open book 📖, bookmark tabs 📑, notebook 📓, native VS Code codicons, plug 🔌, or puzzle 🧩",
+  "config.updates.autoCheck.description": "How often to automatically check for plugin updates from GitHub (startup, hourly, daily, weekly, or never)"
 }

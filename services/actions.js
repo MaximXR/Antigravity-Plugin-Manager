@@ -9,200 +9,239 @@ const {
   createLink,
   syncBackDir,
   twoWayMergeDirs,
-  escapeJsString
+  escapeJsString,
+  getAntigravityConfig,
+  saveAntigravityConfig,
+  setAntigravityPluginEnabled,
+  removeAntigravityPluginFromConfig,
+  setPluginManifestDisabled,
+  getActivePluginsPath,
+  getGlobalPluginsJsonPath,
+  getGlobalSkillsJsonPath,
+  getWorkspacePluginConfigPath,
+  getWorkspaceSkillConfigPath,
+  readJsonConfigFile,
+  resolveJsonConfigPath,
+  addEntryToJsonConfig,
+  removeEntryFromJsonConfig,
+  addExcludeToJsonConfig,
+  removeExcludeFromJsonConfig,
+  ensureDefaultPluginsFolderInGlobalConfig,
+  cleanupDefaultPluginsFolderInGlobalConfig
 } = require('./fsUtils');
 
-// Generic toggle action (Enables or disables resource by physical move + junction, or link)
-async function toggleItem(activePath, storagePath, itemId, enable, lang, category) {
-  // Builtin protection: cannot toggle builtin items
-  if (itemId && (itemId.startsWith('builtin-') || itemId.includes('builtin'))) {
+// Native toggle global plugin:
+// For Default Global plugins (~/.gemini/config/plugins): Default Discovery ignores entry.exclude,
+// so writes disabled to plugin.json (IDE), config.json (Desktop), and root exclude in plugins.json.
+// For Connected Library plugins (E:\AI\plugins or any entries): MUST NOT set disabled in plugin.json
+// or enabled: false in config.json (which act as universal machine-wide blacklists).
+// Instead, toggles strictly via entry.exclude in plugins.json, allowing per-project overrides (Case C4)!
+async function togglePluginGlobal(pluginId, enable, lang, physicalPath = null) {
+  if (pluginId && (pluginId.startsWith('builtin-') || pluginId.includes('builtin'))) {
     throw new Error(getTranslation('cannotModifyBuiltin', lang));
   }
 
-  const activeItemPath = path.join(activePath, itemId);
-  let storageItemPath = path.join(storagePath, itemId);
-
-  // Backwards compatibility check for legacy plugins directly in storage root
-  if (category === 'plugin' && !fs.existsSync(storageItemPath)) {
-    const legacyPath = path.join(path.dirname(storagePath), itemId);
-    if (fs.existsSync(legacyPath)) {
-      storageItemPath = legacyPath;
+  // 1. Resolve physical path of plugin directory
+  let targetDir = physicalPath;
+  const activePluginsPath = getActivePluginsPath();
+  if (!targetDir || !fs.existsSync(targetDir)) {
+    const defaultPath = path.join(activePluginsPath, pluginId);
+    if (fs.existsSync(defaultPath)) {
+      targetDir = defaultPath;
     }
   }
 
-  logDebug(`toggleItem category=${category}: id=${itemId}, enable=${enable}`);
-
-  // Ensure target parent directories exist
-  if (!fs.existsSync(activePath)) {
-    fs.mkdirSync(activePath, { recursive: true });
-  }
-  if (!fs.existsSync(storagePath)) {
-    fs.mkdirSync(storagePath, { recursive: true });
-  }
-
-  const isDir = (category !== 'workflow');
-
-  if (enable) {
-    if (category === 'plugin') {
-      // 1. If active is currently a symlink or junction, remove it
-      let activeIsSym = false;
-      try {
-        const stats = fs.lstatSync(activeItemPath);
-        activeIsSym = stats.isSymbolicLink();
-      } catch (e) {}
-      if (activeIsSym) {
-        fs.unlinkSync(activeItemPath);
-      }
-
-      // 2. Storage check
-      let storageIsSym = false;
-      try {
-        const st = fs.lstatSync(storageItemPath);
-        storageIsSym = st.isSymbolicLink();
-      } catch (e) {}
-
-      if (storageIsSym) {
-        // storage was already a symlink/junction pointing to active
-      } else if (fs.existsSync(storageItemPath)) {
-        if (fs.existsSync(activeItemPath)) {
-          const backupPath = activeItemPath + '_bak_' + Date.now();
-          fs.renameSync(activeItemPath, backupPath);
-        }
-        // Move real physical folder to active
-        safeMoveDir(storageItemPath, activeItemPath);
-
-        // Create junction in storage pointing to active
-        try {
-          if (os.platform() === 'win32') {
-            fs.symlinkSync(activeItemPath, storageItemPath, 'junction');
-          } else {
-            fs.symlinkSync(activeItemPath, storageItemPath, 'dir');
-          }
-        } catch (jErr) {
-          logDebug(`Could not create junction in storage: ${jErr.message}`);
-        }
-      } else {
-        if (!fs.existsSync(activeItemPath)) {
-          throw new Error(getTranslation('storagePathNotSet', lang));
-        }
-      }
-    } else {
-      if (fs.existsSync(storageItemPath)) {
-        let existingIsSymlink = false;
-        try {
-          const stats = fs.lstatSync(activeItemPath);
-          existingIsSymlink = stats.isSymbolicLink();
-        } catch (e) {}
-
-        if (existingIsSymlink) {
-          fs.unlinkSync(activeItemPath);
-        } else if (fs.existsSync(activeItemPath)) {
-          const backupPath = activeItemPath + '_bak_' + Date.now();
-          fs.renameSync(activeItemPath, backupPath);
-        }
-
-        try {
-          createLink(storageItemPath, activeItemPath, isDir, category);
-        } catch (err) {
-          if (err.message === 'CROSS_DRIVE_FILE_LINK_FAILED') {
-            fs.copyFileSync(storageItemPath, activeItemPath);
-            const activeDrive = path.parse(activePath).root;
-            const storageDrive = path.parse(storagePath).root;
-            const warningMsg = getTranslation('workflowLinkWarning', lang)
-              .replace('{activeDrive}', activeDrive.toUpperCase())
-              .replace('{storageDrive}', storageDrive.toUpperCase());
-            vscode.window.showWarningMessage(warningMsg);
-          } else {
-            throw err;
+  if (!targetDir || !fs.existsSync(targetDir)) {
+    const globalPluginsJson = getGlobalPluginsJsonPath();
+    const cfg = readJsonConfigFile(globalPluginsJson);
+    if (cfg && cfg.entries) {
+      for (const ent of cfg.entries) {
+        if (ent.path) {
+          const resolved = resolveJsonConfigPath(ent.path);
+          const candidate = path.join(resolved, pluginId);
+          if (fs.existsSync(candidate)) {
+            targetDir = candidate;
+            break;
           }
         }
+      }
+    }
+  }
+
+  const isDefaultGlobal = targetDir && path.normalize(targetDir).toLowerCase().startsWith(path.normalize(activePluginsPath).toLowerCase());
+  const dirName = targetDir ? path.basename(targetDir) : pluginId;
+  let manifestName = null;
+  if (targetDir && fs.existsSync(targetDir)) {
+    try {
+      const pJson = JSON.parse(fs.readFileSync(path.join(targetDir, 'plugin.json'), 'utf8'));
+      if (pJson.name) manifestName = pJson.name;
+    } catch (_) {}
+  }
+
+  const globalPluginsJson = getGlobalPluginsJsonPath();
+  const namesToSync = [...new Set([dirName, manifestName, pluginId].filter(Boolean))];
+
+  if (isDefaultGlobal) {
+    // 2. Standard Global: Write to plugin.json (Antigravity IDE source of truth)
+    if (targetDir && fs.existsSync(targetDir)) {
+      setPluginManifestDisabled(targetDir, !enable);
+    }
+
+    // 3. Write to config.json (Antigravity Desktop 2.0 / CLI)
+    setAntigravityPluginEnabled(dirName, enable);
+    if (manifestName && manifestName !== dirName) {
+      setAntigravityPluginEnabled(manifestName, enable);
+    }
+    if (pluginId && pluginId !== dirName && pluginId !== manifestName) {
+      setAntigravityPluginEnabled(pluginId, enable);
+    }
+
+    // 4. Sync with global plugins.json exclude list (root exclude)
+    for (const n of namesToSync) {
+      if (enable) {
+        removeExcludeFromJsonConfig(globalPluginsJson, n, targetDir);
       } else {
-        if (!fs.existsSync(activeItemPath)) {
-          throw new Error(getTranslation('storagePathNotSet', lang));
-        }
+        addExcludeToJsonConfig(globalPluginsJson, n, targetDir);
       }
     }
   } else {
-    if (category === 'plugin') {
-      // 1. If storage is a symlink/junction, remove it
-      let storageIsSym = false;
-      try {
-        const st = fs.lstatSync(storageItemPath);
-        storageIsSym = st.isSymbolicLink();
-      } catch (e) {}
-      if (storageIsSym) {
-        fs.unlinkSync(storageItemPath);
-      } else if (fs.existsSync(storageItemPath)) {
-        const backupPath = storageItemPath + '_bak_' + Date.now();
-        fs.renameSync(storageItemPath, backupPath);
-      }
+    // Connected Library Plugin:
+    // Keep plugin.json manifest clean (disabled: false) so projects can load it
+    if (targetDir && fs.existsSync(targetDir)) {
+      setPluginManifestDisabled(targetDir, false);
+    }
 
-      // 2. Active directory
-      let activeIsSym = false;
-      try {
-        const stats = fs.lstatSync(activeItemPath);
-        activeIsSym = stats.isSymbolicLink();
-      } catch (e) {}
+    // Clean any machine-wide killswitch from config.json
+    removeAntigravityPluginFromConfig(dirName);
+    if (manifestName) removeAntigravityPluginFromConfig(manifestName);
+    if (pluginId) removeAntigravityPluginFromConfig(pluginId);
 
-      if (activeIsSym) {
-        fs.unlinkSync(activeItemPath);
-      } else if (fs.existsSync(activeItemPath)) {
-        // Move real physical folder from active back to storage!
-        safeMoveDir(activeItemPath, storageItemPath);
-      }
-    } else {
-      let exists = false;
-      let isSym = false;
-      try {
-        const stats = fs.lstatSync(activeItemPath);
-        exists = true;
-        isSym = stats.isSymbolicLink();
-      } catch (e) {}
-
-      if (exists) {
-        if (isSym) {
-          fs.unlinkSync(activeItemPath);
-        } else {
-          if (isDir) {
-            if (category === 'skill') {
-              syncBackDir(activeItemPath, storageItemPath);
-              fs.rmSync(activeItemPath, { recursive: true, force: true });
-            } else {
-              if (fs.existsSync(storageItemPath)) {
-                const backupPath = storageItemPath + '_bak_' + Date.now();
-                fs.renameSync(storageItemPath, backupPath);
-              }
-              safeMoveDir(activeItemPath, storageItemPath);
-            }
-          } else {
-            // It is a file (workflow)
-            let isHardLinked = false;
-            try {
-              if (fs.existsSync(storageItemPath)) {
-                const statActive = fs.statSync(activeItemPath);
-                const statStorage = fs.statSync(storageItemPath);
-                isHardLinked = (statActive.ino === statStorage.ino && statActive.dev === statStorage.dev);
-              }
-            } catch (e) {}
-
-            if (!isHardLinked) {
-              try {
-                if (fs.existsSync(storageItemPath)) {
-                  const statActive = fs.statSync(activeItemPath);
-                  const statStorage = fs.statSync(storageItemPath);
-                  if (statActive.mtimeMs > statStorage.mtimeMs) {
-                    fs.copyFileSync(activeItemPath, storageItemPath);
-                  }
-                } else {
-                  fs.copyFileSync(activeItemPath, storageItemPath);
-                }
-              } catch (e) {}
-            }
-            fs.unlinkSync(activeItemPath);
-          }
-        }
+    // Sync strictly via entry.exclude in plugins.json
+    for (const n of namesToSync) {
+      if (enable) {
+        removeExcludeFromJsonConfig(globalPluginsJson, n);
+      } else {
+        addExcludeToJsonConfig(globalPluginsJson, n, targetDir);
       }
     }
+  }
+}
+
+// Toggle plugin for a specific project via .agents/plugins.json
+async function togglePluginProject(wsRoot, pluginPhysicalPath, pluginId, action, lang) {
+  if (!wsRoot) {
+    throw new Error(lang === 'ru' ? 'Нет открытой рабочей области.' : 'No open workspace folder.');
+  }
+  const configPath = getWorkspacePluginConfigPath(wsRoot);
+  const dirName = pluginPhysicalPath ? path.basename(pluginPhysicalPath) : pluginId;
+  const idToUse = pluginId || dirName;
+
+  if (action === 'enable' || action === true) {
+    addEntryToJsonConfig(configPath, pluginPhysicalPath, {}, wsRoot);
+    removeExcludeFromJsonConfig(configPath, idToUse);
+    removeExcludeFromJsonConfig(configPath, dirName);
+  } else if (action === 'disable' || action === false) {
+    removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
+    addExcludeToJsonConfig(configPath, idToUse);
+  } else if (action === 'reset' || action === 'default') {
+    removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
+    removeExcludeFromJsonConfig(configPath, idToUse);
+    removeExcludeFromJsonConfig(configPath, dirName);
+  }
+}
+
+// Toggle skill globally via ~/.gemini/config/skills.json exclude list
+async function toggleSkillGlobal(skillName, enable, lang, altName = null, physicalPath = null) {
+  if (skillName && (skillName.startsWith('builtin-') || skillName.includes('builtin'))) {
+    throw new Error(getTranslation('cannotModifyBuiltin', lang));
+  }
+  const globalSkillsJson = getGlobalSkillsJsonPath();
+  if (enable) {
+    removeExcludeFromJsonConfig(globalSkillsJson, skillName, physicalPath);
+    if (altName) removeExcludeFromJsonConfig(globalSkillsJson, altName, physicalPath);
+  } else {
+    addExcludeToJsonConfig(globalSkillsJson, skillName, physicalPath);
+  }
+}
+
+// Toggle skill for a project: 'enable' (add to entries), 'disable' (add to exclude), 'reset' (clear override)
+async function toggleSkillProject(wsRoot, skillPhysicalPath, skillName, action, lang) {
+  if (!wsRoot) {
+    throw new Error(lang === 'ru' ? 'Нет открытой рабочей области.' : 'No open workspace folder.');
+  }
+  const configPath = getWorkspaceSkillConfigPath(wsRoot);
+  const dirName = skillPhysicalPath ? path.basename(skillPhysicalPath) : skillName;
+  const nameToUse = skillName || dirName;
+
+  if (action === 'enable' || action === 'include' || action === true) {
+    addEntryToJsonConfig(configPath, skillPhysicalPath, {}, wsRoot);
+    removeExcludeFromJsonConfig(configPath, nameToUse);
+    removeExcludeFromJsonConfig(configPath, dirName);
+  } else if (action === 'disable' || action === 'exclude' || action === false) {
+    removeEntryFromJsonConfig(configPath, skillPhysicalPath);
+    addExcludeToJsonConfig(configPath, nameToUse);
+  } else if (action === 'reset' || action === 'default') {
+    removeEntryFromJsonConfig(configPath, skillPhysicalPath);
+    removeExcludeFromJsonConfig(configPath, nameToUse);
+    removeExcludeFromJsonConfig(configPath, dirName);
+  }
+}
+
+// Connect an external folder to plugins.json or skills.json
+async function connectFolder(arg1, arg2, arg3, arg4, arg5) {
+  let category, folderPath, wsRoot, lang;
+  if (arg1 === 'workspace' || arg1 === 'global') {
+    // 5-arg signature: (targetType, category, folderPath, wsRoot, lang)
+    category = arg2;
+    folderPath = arg3;
+    wsRoot = arg1 === 'workspace' ? arg4 : null;
+    lang = arg5 || 'en';
+  } else {
+    // 4-arg signature: (category, folderPath, wsRoot, lang)
+    category = arg1;
+    folderPath = arg2;
+    wsRoot = arg3 || null;
+    lang = arg4 || 'en';
+  }
+
+  if (!folderPath || !fs.existsSync(folderPath)) {
+    throw new Error(lang === 'ru' ? 'Указанная папка не существует.' : 'Selected folder does not exist.');
+  }
+
+  const isPlugin = category === 'plugin' || category === 'plugins';
+  let configPath = '';
+  if (wsRoot) {
+    configPath = isPlugin ? getWorkspacePluginConfigPath(wsRoot) : getWorkspaceSkillConfigPath(wsRoot);
+    addEntryToJsonConfig(configPath, folderPath, {}, wsRoot);
+  } else {
+    configPath = isPlugin ? getGlobalPluginsJsonPath() : getGlobalSkillsJsonPath();
+    addEntryToJsonConfig(configPath, folderPath);
+    if (isPlugin) {
+      ensureDefaultPluginsFolderInGlobalConfig();
+    }
+  }
+}
+
+// Disconnect/remove an external folder from plugins.json or skills.json
+async function disconnectFolder(sourceFile, configuredPath, lang) {
+  if (!sourceFile || !fs.existsSync(sourceFile)) {
+    throw new Error(lang === 'ru' ? 'Конфигурационный файл не найден.' : 'Config file not found.');
+  }
+  removeEntryFromJsonConfig(sourceFile, configuredPath);
+  if (sourceFile === getGlobalPluginsJsonPath()) {
+    cleanupDefaultPluginsFolderInGlobalConfig();
+  }
+}
+
+// Backward-compatible generic toggle action (invokes native methods without file moving)
+async function toggleItem(activePath, storagePath, itemId, enable, lang, category, physicalPath = null) {
+  if (itemId && (itemId.startsWith('builtin-') || itemId.includes('builtin'))) {
+    throw new Error(getTranslation('cannotModifyBuiltin', lang));
+  }
+  if (category === 'plugin') {
+    await togglePluginGlobal(itemId, enable, lang, physicalPath);
+  } else if (category === 'skill') {
+    await toggleSkillGlobal(itemId, enable, lang, null, physicalPath);
   }
 }
 
@@ -709,6 +748,12 @@ async function resolveConflict(data, lang) {
 
 module.exports = {
   toggleItem,
+  togglePluginGlobal,
+  togglePluginProject,
+  toggleSkillGlobal,
+  toggleSkillProject,
+  connectFolder,
+  disconnectFolder,
   toggleHook,
   toggleMcpServer,
   deleteHook,
@@ -720,4 +765,5 @@ module.exports = {
   resolveConflict,
   migrateStorage
 };
+
 
