@@ -46,6 +46,8 @@
 * 🔄 **Обновление плагинов из GitHub:** проверяет наличие новых версий в репозиториях авторов и обновляет плагины в один клик с наглядным выводом процесса.
 * 👁️ **Инспектор контекста (Live Context):** считывает сессии Antigravity и показывает, какие именно инструкции фактически ушли в системный промпт в последнем сообщении.
 
+![Каталог навыков и переопределения для проектов](resources/screenshot-skills.png)
+
 ---
 
 ### Как это работает: нативная конфигурация без поломки Git
@@ -129,6 +131,8 @@ Antigravity does not provide a built-in UI for managing customizations. In pract
 * 📁 **Instant File & Folder Access:** Open `SKILL.md`, `GEMINI.md`, or `plugin.json` in the editor with one click, or jump directly to plugin folders in File Explorer.
 * 🔄 **GitHub 1-Click Updates:** Checks author repositories for newer plugin versions and updates them in one click with a transparent process log.
 * 👁️ **Live Context Inspector:** Inspects active IDE conversation records to reveal the exact instructions delivered to the model in the latest message turn.
+
+![Skills Catalog & Project Overrides](resources/screenshot-skills.png)
 
 ---
 

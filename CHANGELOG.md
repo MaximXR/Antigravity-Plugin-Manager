@@ -1,5 +1,15 @@
 # История изменений / Changelog
 
+## 1.2.18
+
+### Русский
+* **Актуальные скриншоты интерфейса в README и документации:**
+  - Обновлены ключевые скриншоты расширения в каталоге `resources/`: добавлен реальный вид дашборда «Активное» и вкладки «Навыки (Skills)» с наглядной демонстрацией изумрудных полос активности, приглушенных тумблеров и независимых проектных переопределений.
+
+### English
+* **Updated UI Screenshots in README & Documentation:**
+  - Refreshed primary screenshots in `resources/` showcasing the Active Context Dashboard and Skills catalog with high-contrast emerald accent stripes, project overrides, and clean toggle states.
+
 ## 1.2.17
 
 ### Русский
