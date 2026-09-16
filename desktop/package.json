@@ -1,0 +1,67 @@
+{
+  "name": "antigravity-plugin-manager-desktop",
+  "productName": "AI Skill & Plugin Manager Desktop",
+  "version": "1.2.19",
+  "description": "Standalone desktop AI context manager for Antigravity 2.0 and CLI",
+  "main": "main.js",
+  "author": "MaximXR",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "syntax-check": "node -c main.js preload.js services/projects.js ../services/vscodeShim.js ../services/fsUtils.js ../services/scanners.js ../services/actions.js ../services/updater.js ../webview/js/state.js ../webview/js/syncEta.js ../webview/js/ipc.js ../webview/js/controls.js ../webview/js/actions.js ../webview/js/pluginDetails.js ../webview/js/cards.js ../webview/js/activeContext.js ../webview/js/modals.js ../webview/js/main.js ../locales/translations.js && node -e \"const fsUtils = require('../services/fsUtils'); const path = require('path'); const script = fsUtils.getWebviewScript(path.join(__dirname, '../webview')); const fs = require('fs'); fs.writeFileSync('temp_bundle_check.js', script); require('child_process').execSync('node -c temp_bundle_check.js'); fs.unlinkSync('temp_bundle_check.js'); console.log('Concatenated webview bundle check: PASS');\"",
+    "test": "node test/run_tests.js",
+    "test:smoke": "electron . --smoke-test"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.maximxr.antigravity-plugin-manager-desktop",
+    "productName": "AI Skill & Plugin Manager Desktop",
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "services/**/*",
+      {
+        "from": "../services",
+        "to": "services",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../webview",
+        "to": "webview",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../locales",
+        "to": "locales",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../resources",
+        "to": "resources",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "zip",
+        "portable"
+      ],
+      "icon": "../resources/icon.ico"
+    }
+  }
+}

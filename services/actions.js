@@ -1,4 +1,9 @@
-const vscode = require('vscode');
+let vscode;
+try {
+  vscode = require('vscode');
+} catch (e) {
+  vscode = require('./vscodeShim');
+}
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -27,7 +32,8 @@ const {
   addExcludeToJsonConfig,
   removeExcludeFromJsonConfig,
   ensureDefaultPluginsFolderInGlobalConfig,
-  cleanupDefaultPluginsFolderInGlobalConfig
+  cleanupDefaultPluginsFolderInGlobalConfig,
+  getBuiltinPath
 } = require('./fsUtils');
 
 // Native toggle global plugin:
@@ -127,32 +133,72 @@ async function togglePluginGlobal(pluginId, enable, lang, physicalPath = null) {
   }
 }
 
-// Toggle plugin for a specific project via .agents/plugins.json
-async function togglePluginProject(wsRoot, pluginPhysicalPath, pluginId, action, lang) {
-  if (!wsRoot) {
+// Toggle plugin for a specific project (or multiple project folders) via .agents/plugins.json
+async function togglePluginProject(wsRootOrRoots, pluginPhysicalPath, pluginId, action, lang) {
+  if (!wsRootOrRoots || (Array.isArray(wsRootOrRoots) && wsRootOrRoots.length === 0)) {
     throw new Error(lang === 'ru' ? 'Нет открытой рабочей области.' : 'No open workspace folder.');
   }
-  const configPath = getWorkspacePluginConfigPath(wsRoot);
-  const dirName = pluginPhysicalPath ? path.basename(pluginPhysicalPath) : pluginId;
-  const idToUse = pluginId || dirName;
+  const roots = Array.isArray(wsRootOrRoots) ? wsRootOrRoots : [wsRootOrRoots];
+  for (const wsRoot of roots) {
+    if (!wsRoot) continue;
+    const configPath = getWorkspacePluginConfigPath(wsRoot);
+    const dirName = pluginPhysicalPath ? path.basename(pluginPhysicalPath) : pluginId;
+    const idToUse = pluginId || dirName;
 
-  if (action === 'enable' || action === true) {
-    addEntryToJsonConfig(configPath, pluginPhysicalPath, {}, wsRoot);
-    removeExcludeFromJsonConfig(configPath, idToUse);
-    removeExcludeFromJsonConfig(configPath, dirName);
-  } else if (action === 'disable' || action === false) {
-    removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
-    addExcludeToJsonConfig(configPath, idToUse);
-  } else if (action === 'reset' || action === 'default') {
-    removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
-    removeExcludeFromJsonConfig(configPath, idToUse);
-    removeExcludeFromJsonConfig(configPath, dirName);
+    if (action === 'enable' || action === true) {
+      addEntryToJsonConfig(configPath, pluginPhysicalPath, {}, wsRoot);
+      removeExcludeFromJsonConfig(configPath, idToUse);
+      removeExcludeFromJsonConfig(configPath, dirName);
+    } else if (action === 'disable' || action === false) {
+      removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
+      addExcludeToJsonConfig(configPath, idToUse);
+    } else if (action === 'reset' || action === 'default') {
+      removeEntryFromJsonConfig(configPath, pluginPhysicalPath);
+      removeExcludeFromJsonConfig(configPath, idToUse);
+      removeExcludeFromJsonConfig(configPath, dirName);
+    }
   }
+}
+
+// Helper to check if a path or resource is protected (case-insensitive for Windows)
+function isProtectedResource(physicalPath) {
+  if (!physicalPath) return false;
+  const lowerPath = path.normalize(physicalPath).toLowerCase();
+  const baseName = path.basename(lowerPath);
+  if (
+    baseName === 'gemini.md' ||
+    baseName === 'agents.md' ||
+    lowerPath.endsWith('gemini.md') ||
+    lowerPath.endsWith('agents.md')
+  ) {
+    return true;
+  }
+  let builtinSkillsPath = '';
+  try {
+    builtinSkillsPath = path.join(getBuiltinPath(), 'skills').toLowerCase();
+  } catch (_) {}
+  if (lowerPath.includes('builtin') || (builtinSkillsPath && lowerPath.startsWith(builtinSkillsPath))) {
+    return true;
+  }
+  return false;
 }
 
 // Toggle skill globally via ~/.gemini/config/skills.json exclude list
 async function toggleSkillGlobal(skillName, enable, lang, altName = null, physicalPath = null) {
-  if (skillName && (skillName.startsWith('builtin-') || skillName.includes('builtin'))) {
+  const lowerName = (skillName || '').toLowerCase();
+  const lowerPath = (physicalPath || '').toLowerCase();
+  let builtinSkillsPath = '';
+  try {
+    builtinSkillsPath = path.join(getBuiltinPath(), 'skills').toLowerCase();
+  } catch (_) {}
+
+  if (
+    lowerName.startsWith('builtin-') ||
+    lowerName.includes('builtin') ||
+    lowerPath.includes('builtin') ||
+    (builtinSkillsPath && lowerPath.startsWith(builtinSkillsPath)) ||
+    isProtectedResource(physicalPath)
+  ) {
     throw new Error(getTranslation('cannotModifyBuiltin', lang));
   }
   const globalSkillsJson = getGlobalSkillsJsonPath();
@@ -164,26 +210,30 @@ async function toggleSkillGlobal(skillName, enable, lang, altName = null, physic
   }
 }
 
-// Toggle skill for a project: 'enable' (add to entries), 'disable' (add to exclude), 'reset' (clear override)
-async function toggleSkillProject(wsRoot, skillPhysicalPath, skillName, action, lang) {
-  if (!wsRoot) {
+// Toggle skill for a project (or multiple project folders): 'enable' (add to entries), 'disable' (add to exclude), 'reset' (clear override)
+async function toggleSkillProject(wsRootOrRoots, skillPhysicalPath, skillName, action, lang) {
+  if (!wsRootOrRoots || (Array.isArray(wsRootOrRoots) && wsRootOrRoots.length === 0)) {
     throw new Error(lang === 'ru' ? 'Нет открытой рабочей области.' : 'No open workspace folder.');
   }
-  const configPath = getWorkspaceSkillConfigPath(wsRoot);
-  const dirName = skillPhysicalPath ? path.basename(skillPhysicalPath) : skillName;
-  const nameToUse = skillName || dirName;
+  const roots = Array.isArray(wsRootOrRoots) ? wsRootOrRoots : [wsRootOrRoots];
+  for (const wsRoot of roots) {
+    if (!wsRoot) continue;
+    const configPath = getWorkspaceSkillConfigPath(wsRoot);
+    const dirName = skillPhysicalPath ? path.basename(skillPhysicalPath) : skillName;
+    const nameToUse = skillName || dirName;
 
-  if (action === 'enable' || action === 'include' || action === true) {
-    addEntryToJsonConfig(configPath, skillPhysicalPath, {}, wsRoot);
-    removeExcludeFromJsonConfig(configPath, nameToUse);
-    removeExcludeFromJsonConfig(configPath, dirName);
-  } else if (action === 'disable' || action === 'exclude' || action === false) {
-    removeEntryFromJsonConfig(configPath, skillPhysicalPath);
-    addExcludeToJsonConfig(configPath, nameToUse);
-  } else if (action === 'reset' || action === 'default') {
-    removeEntryFromJsonConfig(configPath, skillPhysicalPath);
-    removeExcludeFromJsonConfig(configPath, nameToUse);
-    removeExcludeFromJsonConfig(configPath, dirName);
+    if (action === 'enable' || action === 'include' || action === true) {
+      addEntryToJsonConfig(configPath, skillPhysicalPath, {}, wsRoot);
+      removeExcludeFromJsonConfig(configPath, nameToUse);
+      removeExcludeFromJsonConfig(configPath, dirName);
+    } else if (action === 'disable' || action === 'exclude' || action === false) {
+      removeEntryFromJsonConfig(configPath, skillPhysicalPath);
+      addExcludeToJsonConfig(configPath, nameToUse);
+    } else if (action === 'reset' || action === 'default') {
+      removeEntryFromJsonConfig(configPath, skillPhysicalPath);
+      removeExcludeFromJsonConfig(configPath, nameToUse);
+      removeExcludeFromJsonConfig(configPath, dirName);
+    }
   }
 }
 
@@ -514,9 +564,11 @@ ${nameField}description: "${escapeJsString(description || '')}"
 // Delete item (with protection for built-in and global protected items)
 async function deleteItem(category, itemId, displayName, physicalPath, lang, activeSkillsPath) {
   // Builtin and protected checks
-  if (itemId && (itemId.startsWith('builtin-') || itemId.includes('builtin')) || 
-      physicalPath.includes('builtin') ||
-      physicalPath.endsWith('GEMINI.md') || physicalPath.endsWith('AGENTS.md')) {
+  const lowerId = (itemId || '').toLowerCase();
+  if (
+    (lowerId && (lowerId.startsWith('builtin-') || lowerId.includes('builtin'))) ||
+    isProtectedResource(physicalPath)
+  ) {
     throw new Error(getTranslation('cannotModifyBuiltin', lang));
   }
 
@@ -641,6 +693,25 @@ async function deleteItem(category, itemId, displayName, physicalPath, lang, act
   }
 }
 
+// Move item with protection checks for built-in skills and protected files
+async function moveItem(physicalPath, targetDir, lang = 'en') {
+  if (!physicalPath || !targetDir) {
+    return { success: false, message: 'Invalid paths' };
+  }
+  if (isProtectedResource(physicalPath)) {
+    return { success: false, message: 'Protected resource cannot be moved' };
+  }
+  if (!fs.existsSync(physicalPath)) {
+    return { success: false, message: `Source file does not exist: ${physicalPath}` };
+  }
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+  const targetFile = path.join(targetDir, path.basename(physicalPath));
+  safeMoveDir(physicalPath, targetFile);
+  return { success: true, targetPath: targetFile };
+}
+
 // Migrate storage folders to new structure on storage path change
 async function migrateStorage(oldPath, newPath, lang) {
   if (!fs.existsSync(oldPath)) return;
@@ -762,6 +833,8 @@ module.exports = {
   moveHook,
   createItem,
   deleteItem,
+  moveItem,
+  isProtectedResource,
   resolveConflict,
   migrateStorage
 };

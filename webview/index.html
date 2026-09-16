@@ -1,12 +1,19 @@
 <!DOCTYPE html>
-<html lang="{{lang}}">
+<html lang="{{lang}}" style="background-color: #1e1e2e; color-scheme: dark;">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      background-color: #1e1e2e !important;
+      color: #f8fafc;
+    }
+  </style>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <!-- INJECT_STYLE -->
 </head>
-<body class="loading">
+<body>
   <div class="container">
     <!-- Unified Permanent Sticky Navigation Header (ALWAYS AT TOP: 0) -->
     <div class="sticky-nav-header" id="sticky-nav-header">
@@ -42,17 +49,29 @@
             <span class="tab-help-icon" data-tooltip="{{captionHooksEsc}}">?</span>
           </button>
         </div>
-        <div class="lang-selector-container" style="flex-shrink: 0; display: flex; align-items: center; gap: 6px;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="2" y1="12" x2="22" y2="12"></line>
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-          </svg>
-          <select id="lang-select" style="background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 11px; padding: 3px 6px; border-radius: 6px; outline: none; cursor: pointer;">
-            <option value="auto" {{configLangAuto}}>Auto</option>
-            <option value="en" {{configLangEn}}>English</option>
-            <option value="ru" {{configLangRu}}>Русский</option>
-          </select>
+        <div class="tabs-right-group" style="flex-shrink: 0; display: flex; align-items: center; gap: 10px;">
+          <!-- Antigravity 2.0 Native Projects Selector -->
+          <div class="project-selector-container" id="project-selector-container" style="display: none; align-items: center; gap: 5px;" title="{{antigravityProjectsGroup}}">
+            <span style="font-size: 13px; opacity: 0.85;">📁</span>
+            <select id="antigravity-project-select" class="project-selector-select" onchange="switchAntigravityProject(this.value)">
+            </select>
+            <button class="btn btn-secondary" id="btn-refresh-projects" style="padding: 2px 6px; font-size: 11px; height: 24px; min-width: 24px; display: inline-flex; align-items: center; justify-content: center;" onclick="refreshAntigravityProjects(this)" title="{{refreshProjectsBtn}}">
+              <span class="refresh-spin-icon">🔄</span>
+            </button>
+          </div>
+          <!-- Language Selector -->
+          <div class="lang-selector-container" style="display: flex; align-items: center; gap: 6px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.8;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            <select id="lang-select" class="lang-selector-select">
+              <option value="auto" {{configLangAuto}}>Auto</option>
+              <option value="en" {{configLangEn}}>English</option>
+              <option value="ru" {{configLangRu}}>Русский</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -235,6 +254,18 @@
               <span class="config-subrow-label">{{lblFolders}}</span>
               <div class="config-subrow-buttons">
                 <button class="btn btn-secondary btn-chip" id="btn-open-project-agents-folder" title="Workspace .agents folder">📁 {{openAgentsFolderBtn}}</button>
+              </div>
+            </div>
+            <div class="config-subrow multi-root-target-row" id="multi-root-target-row" style="display: none;">
+              <span class="config-subrow-label">{{targetFolderMode}}</span>
+              <div class="config-subrow-buttons" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <select id="multi-root-target-mode" class="project-selector-select" style="font-size: 11px; padding: 2px 6px;" onchange="changeMultiRootTargetMode(this.value)">
+                  <option value="primary">{{targetModePrimary}}</option>
+                  <option value="all">{{targetModeAll}}</option>
+                  <option value="specific">{{targetModeSpecific}}</option>
+                </select>
+                <select id="multi-root-specific-folder-select" class="project-selector-select" style="font-size: 11px; padding: 2px 6px; display: none;" onchange="changeMultiRootSpecificFolder(this.value)">
+                </select>
               </div>
             </div>
           </div>
@@ -499,7 +530,7 @@
         
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label class="storage-title">{{labelCategory}}</label>
-          <select id="create-category" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; cursor: pointer; width: 100%;">
+          <select id="create-category" class="modal-form-select">
             <option value="rule">{{tabRules}}</option>
             <option value="skill">{{tabSkills}}</option>
             <option value="plugin">{{tabPlugins}}</option>
@@ -509,7 +540,7 @@
 
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label class="storage-title">{{labelTarget}}</label>
-          <select id="create-target" style="background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-glass); color: var(--text-main); font-family: inherit; font-size: 12px; padding: 8px 10px; border-radius: 6px; outline: none; cursor: pointer; width: 100%;">
+          <select id="create-target" class="modal-form-select">
             <option value="global">{{optGlobalOption}}</option>
           </select>
         </div>

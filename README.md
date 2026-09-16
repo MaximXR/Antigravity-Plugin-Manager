@@ -1,4 +1,5 @@
 # Antigravity Plugin Manager
+### AI Skill & Plugin Manager for IDE & Desktop
 
 [Русский](#русский) | [English](#english)
 
@@ -10,11 +11,13 @@
 
 ## Русский
 
-**Antigravity Plugin Manager** — графическая панель управления плагинами, навыками, правилами и MCP-серверами для **Antigravity IDE** и **Antigravity 2.0**.
+**Antigravity Plugin Manager** (также известный как **AI Skill & Plugin Manager**) — графическая панель управления плагинами, навыками, правилами и MCP-серверами для **Antigravity IDE** и **Antigravity 2.0 (Desktop / CLI)**.
 
-Дает полный визуальный контроль над окружением ИИ-агента: смотрите, какие инструкции реально активны прямо сейчас, и переключайте их в один клик — без ручного поиска и правок в скрытых папках `.gemini`.
+Доступен в двух удобных форматах:
+1. **Встроенное расширение для Antigravity IDE:** панель управления прямо в Activity Bar редактора с тумблерами, мягким перезапуском сервера (Soft Apply) и счетчиком в статус-баре.
+2. **Автономное приложение AI Skill & Plugin Manager Desktop:** независимая настольная программа для пользователей обычного **Antigravity 2.0 (Desktop)** и консоли **Antigravity CLI (`agy`)**. Работает автономно без запущенного редактора, сворачивается в системный трей и позволяет переключать контекст между любыми проектами на лету.
 
-👉 **[Скачать готовый VSIX (Релизы)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Установка за 1 минуту • Бесплатно и с открытым исходным кодом
+👉 **[Скачать расширение (.vsix) или Desktop-приложение (.exe / .zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Портативно и без установки • Бесплатно и с открытым исходным кодом
 
 ![Панель управления Менеджера плагинов](resources/screenshot-webview-ru.png)
 
@@ -38,6 +41,8 @@
 ### Возможности
 
 * 📊 **Дашборд «Активное»:** моментально показывает список и точное количество реально действующих плагинов, правил, навыков, воркфлоу, MCP-серверов и хуков. Плюс компактный счетчик в статус-баре IDE с подробной подсказкой.
+* 🖥️ **Две среды работы (IDE Extension & Standalone Desktop):** используйте панель внутри IDE или автономное настольное приложение **AI Skill & Plugin Manager Desktop** с поддержкой системного трея и переключателем проектов Antigravity 2.0.
+* 🔍 **Глубокий поиск правил (Rules Engine):** полностью сканирует все 4 варианта проектных служебных каталогов (`.agents/rules/`, `.agent/rules/`, `_agents/rules/`, `_agent/rules/`) с рекурсией по подпапкам (`rules/**/*.md`), находит корневые проектные правила `AGENTS.md` и `GEMINI.md`, а также правила, поставляемые внутри подключенных плагинов (`wordstat`, `file-operations` и др.).
 * 🎛️ **Переключение в один клик:** включайте и выключайте плагины, навыки и MCP-серверы простыми тумблерами прямо в интерфейсе без ручной правки JSON.
 * 🎯 **Настройки под проект (Project Overrides):** держите плагин выключенным глобально, но включайте его в 1 клик для конкретного репозитория (`[✓ Вкл]`). Или заглушите тяжелый инструмент в текущем проекте (`[✕ Выкл]`), не меняя общих настроек.
 * ⚡ **Мягкое применение за 1–2 секунды (Soft Apply):** перезапускает только фоновый языковой сервер Antigravity. Окно IDE, открытые файлы и история чатов остаются на месте, а обновленный контекст применяется на лету.
@@ -64,19 +69,28 @@ Antigravity штатно поддерживает управление акти�
 
 ### Честные ограничения
 
-* ⚠️ **Только для экосистемы Google Antigravity:** Расширение разработано специально для **Antigravity IDE** и **Antigravity 2.0 (Desktop / CLI)**. Для стандартного VS Code оно не предназначено, так как там нет системы агентов и кастомизаций Antigravity.
+* ⚠️ **Только для экосистемы Google Antigravity:** Расширение и настольное приложение разработаны специально для **Antigravity IDE** и **Antigravity 2.0 (Desktop / CLI)**. Для стандартного VS Code они не предназначены, так как там нет системы агентов и кастомизаций Antigravity.
 * **Встроенные системные компоненты (`builtin`):** Системные навыки и конфигурации, поставляемые вместе с IDE, доступны только для чтения и защищены от случайного удаления.
 
 ---
 
-### Установка
+### Установка и запуск
 
+#### Вариант 1: Встроенное расширение для Antigravity IDE (.vsix)
 1. Скачайте актуальный файл `.vsix` со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**.
 2. В Antigravity IDE откройте панель расширений (`Ctrl+Shift+X`).
 3. Нажмите на меню с тремя точками `...` в правом верхнем углу панели ➔ **Install from VSIX...** и выберите скачанный файл.
 
+#### Вариант 2: Автономное приложение AI Skill & Plugin Manager Desktop (.exe / .zip)
+1. Скачайте архив `.zip` (или готовый `.exe`) со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**.
+2. Распакуйте архив в любую папку или запустите переносимый исполняемый файл `.exe`.
+3. Приложение готово к работе: оно автоматически определит активный проект Antigravity 2.0 и свернется в трей по закрытию окна.
+
 > 💡 **Сборка из исходников:**
-> Склонируйте репозиторий и запустите `build.bat` в корне проекта. Скрипт соберет актуальный `.vsix` в каталог `dist/`.
+> Склонируйте репозиторий и запустите диспетчер сборки `build.bat` в корне:
+> * `build.bat ide` (или `build-ide.bat`) — собрать расширение для IDE (`dist/*.vsix`)
+> * `build.bat desktop` (или `build-desktop.bat`) — собрать десктопное приложение (`dist/*.exe`, `dist/*.zip` и распакованную папку `dist/win-unpacked/`)
+> * `build.bat all` — собрать оба продукта одновременно
 
 ---
 
@@ -96,11 +110,13 @@ Antigravity штатно поддерживает управление акти�
 
 ## English
 
-**Antigravity Plugin Manager** is a visual control panel for plugins, skills, rules, and MCP servers in **Antigravity IDE** and **Antigravity 2.0**.
+**Antigravity Plugin Manager** (also known as **AI Skill & Plugin Manager**) is a visual control panel for plugins, skills, rules, and MCP servers in **Antigravity IDE** and **Antigravity 2.0 (Desktop / CLI)**.
 
-Gain complete visibility and control over your AI agent's environment: see what instructions are actually active right now, and toggle customizations in a single click — without digging through hidden `.gemini` folders.
+Available in two convenient form factors:
+1. **Built-in Antigravity IDE Extension:** full control panel in the IDE Activity Bar with 1-click toggles, background Soft Apply, and a live context status bar counter.
+2. **Standalone AI Skill & Plugin Manager Desktop:** independent Electron desktop app for users of standard **Antigravity 2.0 (Desktop)** and **Antigravity CLI (`agy`)**. Runs without VS Code, minimizes to the system tray, and enables seamless project switching on the fly.
 
-👉 **[Download Ready-to-Use VSIX (Releases)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • 1-Minute Setup • Free & Open Source
+👉 **[Download Extension (.vsix) or Desktop App (.exe / .zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Portable & Zero-Install • Free & Open Source
 
 ![Plugin Manager Control Panel](resources/screenshot-webview-en.png)
 
@@ -124,6 +140,8 @@ Antigravity does not provide a built-in UI for managing customizations. In pract
 ### Key Capabilities
 
 * 📊 **"Active" Dashboard:** Instantly displays exact counts and lists of active plugins, rules, skills, workflows, MCP servers, and hooks. Includes a compact status bar counter with rich hover tooltips.
+* 🖥️ **Dual Form Factors (IDE Extension & Standalone Desktop):** Use the integrated IDE panel or run the standalone **AI Skill & Plugin Manager Desktop** app with system tray support and quick Antigravity 2.0 project switching.
+* 🔍 **Comprehensive Rules Discovery Engine:** Fully scans all 4 Antigravity workspace customization directories (`.agents/rules/`, `.agent/rules/`, `_agents/rules/`, `_agent/rules/`) with recursive subdirectory support (`rules/**/*.md`), root project rules `AGENTS.md` and `GEMINI.md`, and rules bundled inside active plugins (`wordstat`, `file-operations`, etc.).
 * 🎛️ **1-Click Toggles:** Enable or disable plugins, skills, and MCP servers with simple switches directly in the UI without touching raw JSON files.
 * 🎯 **Project-Level Overrides:** Keep a plugin disabled globally, but enable it in one click for a specific repository (`[✓ On]`). Or suppress a heavy tool in one project (`[✕ Off]`) without altering your global setup.
 * ⚡ **1–2 Second Soft Apply:** Restarts only the background Antigravity language server. Your IDE window, open files, and active chat sessions remain untouched while context refreshes on the fly.
@@ -150,19 +168,28 @@ Plugin and skill directories always remain in their original locations. The mana
 
 ### Honest Limitations
 
-* ⚠️ **Antigravity Ecosystem Only:** Designed exclusively for **Antigravity IDE** and **Antigravity 2.0 (Desktop / CLI)**. It does not work with standard VS Code, as vanilla VS Code lacks Antigravity's agent customization engine.
+* ⚠️ **Antigravity Ecosystem Only:** Both the IDE extension and the standalone desktop app are designed exclusively for **Antigravity IDE** and **Antigravity 2.0 (Desktop / CLI)**. They do not work with vanilla VS Code, as it lacks Antigravity's agent customization engine.
 * **Built-in System Components (`builtin`):** System skills and configurations bundled with the IDE are strictly read-only to prevent breaking the environment.
 
 ---
 
-### Installation
+### Installation & Launch
 
+#### Option 1: Built-in Extension for Antigravity IDE (.vsix)
 1. Download the `.vsix` file from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page.
 2. In Antigravity IDE, open the Extensions panel (`Ctrl+Shift+X`).
 3. Click the `...` menu (top-right corner of the Extensions panel) ➔ **Install from VSIX...** and select the downloaded file.
 
+#### Option 2: Standalone AI Skill & Plugin Manager Desktop (.exe / .zip)
+1. Download the `.zip` archive (or portable `.exe`) from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page.
+2. Unpack the archive to any directory or run the portable `.exe` directly.
+3. The app starts immediately, auto-detects your active Antigravity 2.0 project, and minimizes to the system tray upon closing.
+
 > 💡 **Build from Source:**
-> Clone the repository and run `build.bat` in the project root. The script compiles the extension and places the `.vsix` in `dist/`.
+> Clone the repository and run the unified `build.bat` script in the project root:
+> * `build.bat ide` (or `build-ide.bat`) — build the IDE extension (`dist/*.vsix`)
+> * `build.bat desktop` (or `build-desktop.bat`) — build the standalone Desktop app (`dist/*.exe`, `dist/*.zip`, and unpacked folder `dist/win-unpacked/`)
+> * `build.bat all` — build both packages sequentially
 
 ---
 

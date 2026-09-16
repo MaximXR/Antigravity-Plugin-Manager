@@ -1,24 +1,80 @@
 @echo off
+setlocal enabledelayedexpansion
+
 echo ==================================================
-echo Antigravity Plugin Manager Build Automation
+echo Antigravity Plugin Manager Multi-Target Build
 echo ==================================================
 
-echo [1/3] Cleaning up old build files...
+set TARGET=%1
+if "%TARGET%"=="" set TARGET=vsix
+
+if not exist dist mkdir dist
+
+if "%TARGET%"=="all" goto BUILD_EXT
+if "%TARGET%"=="vsix" goto BUILD_EXT
+if "%TARGET%"=="ide" goto BUILD_EXT
+if "%TARGET%"=="ext" goto BUILD_EXT
+if "%TARGET%"=="desktop" goto BUILD_DESKTOP
+if "%TARGET%"=="electron" goto BUILD_DESKTOP
+
+echo [ERROR] Unknown build target: %TARGET%
+echo Usage:
+echo   build.bat           - Build IDE extension (.vsix)
+echo   build.bat ide       - Build IDE extension (.vsix) [or run build-ide.bat]
+echo   build.bat desktop   - Build Electron Desktop (.exe / portable) [or run build-desktop.bat]
+echo   build.bat vsix      - Build IDE extension (vsix alias)
+echo   build.bat all       - Build both Extension and Desktop
+echo.
+echo Shortcuts:
+echo   build-ide.bat       - Direct shortcut for IDE extension build (.vsix)
+echo   build-desktop.bat   - Direct shortcut for Desktop build (.exe)
+exit /b 1
+
+:BUILD_EXT
+echo.
+echo [1/2] Packaging extension via vsce...
 if exist *.vsix del /q /f *.vsix
-
-echo [2/3] Packaging extension via vsce...
 call npx @vscode/vsce package --allow-star-activation --allow-missing-repository --skip-license
 
-
-echo [3/3] Moving and renaming the packaged VSIX to dist/...
-node -e "const fs = require('fs'); const path = require('path'); const pkg = JSON.parse(fs.readFileSync('package.json')); const tgt = path.join('dist', 'Antigravity-plugin-manager-' + pkg.version + '.vsix'); if (!fs.existsSync('dist')) { fs.mkdirSync('dist'); } if (fs.existsSync(tgt)) { fs.unlinkSync(tgt); } const files = fs.readdirSync('.').filter(f => f.endsWith('.vsix') && f.includes('plugin-manager')); if (files.length > 0) { fs.renameSync(files[0], tgt); console.log('Successfully moved and renamed ' + files[0] + ' to ' + tgt); } else { console.error('Error: Packaged VSIX file was not found!'); process.exit(1); }"
+if not exist dist mkdir dist
+move /y *.vsix dist\
 
 if %errorlevel% neq 0 (
-    echo [ERROR] Move/Rename failed!
+    echo [ERROR] Extension build failed!
     exit /b 1
 )
 
+if "%TARGET%"=="ext" goto BUILD_FINISH
+if "%TARGET%"=="vsix" goto BUILD_FINISH
+if "%TARGET%"=="ide" goto BUILD_FINISH
+
+:BUILD_DESKTOP
+echo.
+echo [2/2] Building Electron Desktop Application...
+cd /d "%~dp0desktop"
+
+:: Synchronize version from root package.json to desktop/package.json
+node -e "const fs = require('fs'); const rootPkg = JSON.parse(fs.readFileSync('../package.json')); const deskPkg = JSON.parse(fs.readFileSync('package.json')); deskPkg.version = rootPkg.version; fs.writeFileSync('package.json', JSON.stringify(deskPkg, null, 2) + '\n'); console.log('Synchronized Desktop version to v' + deskPkg.version);"
+
+if not exist node_modules (
+    echo Installing Desktop dependencies...
+    call npm install
+)
+
+call npm run build
+if %errorlevel% neq 0 (
+    echo [ERROR] Desktop build failed!
+    cd /d "%~dp0"
+    exit /b 1
+)
+cd /d "%~dp0"
+
+:BUILD_FINISH
+echo.
 echo ==================================================
-echo Build finished successfully!
-echo Output VSIX is ready at: dist/
+echo Build completed successfully!
+echo Artifacts ready in dist/:
+dir /b /o-d dist\*.vsix dist\*.exe dist\*.zip 2>nul
+echo.
+echo Local unpacked executable ready in: dist\win-unpacked\
 echo ==================================================

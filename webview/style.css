@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --primary-gradient: linear-gradient(135deg, #6366f1, #a855f7);
   --success-gradient: linear-gradient(135deg, #10b981, #059669);
   --danger-gradient: linear-gradient(135deg, #ef4444, #dc2626);
@@ -6,6 +7,30 @@
   --border-glass: rgba(255, 255, 255, 0.06);
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
+}
+
+/* Native dark scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+html {
+  background-color: var(--vscode-editor-background, #1e1e2e);
+  color-scheme: dark;
 }
 
 body {
@@ -19,7 +44,7 @@ body {
 }
 
 body.loading {
-  opacity: 0;
+  opacity: 0.95;
 }
 
 .container {
@@ -2383,4 +2408,85 @@ input:checked + .slider:before {
   border-color: rgba(239, 68, 68, 0.45);
   font-weight: 600;
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.25);
+}
+
+/* ==========================================================================
+   Form Controls & Select Dropdowns Dark Theme (Cross-Platform)
+   ========================================================================== */
+select {
+  color-scheme: dark;
+  background-color: #1e1e2e;
+  color: var(--text-main, #f8fafc);
+  border: 1px solid var(--border-glass, rgba(255, 255, 255, 0.1));
+}
+
+select option,
+select optgroup {
+  background-color: #181825 !important;
+  color: #f8fafc !important;
+  padding: 6px 10px;
+}
+
+select option:checked,
+select option:hover,
+select option:focus {
+  background-color: #2e2e44 !important;
+  color: #ffffff !important;
+}
+
+.project-selector-select,
+.lang-selector-select,
+.workspace-scope-select,
+.modal-form-select {
+  color-scheme: dark;
+  background-color: #181825 !important;
+  border: 1px solid var(--border-glass, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--text-main, #f8fafc) !important;
+  font-family: inherit;
+  font-size: 11px;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  padding: 3px 8px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.project-selector-select {
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.lang-selector-select {
+  padding: 3px 6px;
+}
+
+.modal-form-select {
+  font-size: 12px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.project-selector-select:hover,
+.lang-selector-select:hover,
+.workspace-scope-select:hover,
+.modal-form-select:hover {
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  background-color: #222235 !important;
+}
+
+.project-selector-select:focus,
+.lang-selector-select:focus,
+.workspace-scope-select:focus,
+.modal-form-select:focus {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.project-selector-select option,
+.lang-selector-select option,
+.workspace-scope-select option,
+.modal-form-select option {
+  background-color: #181825 !important;
+  color: #f8fafc !important;
+  padding: 6px 10px;
 }

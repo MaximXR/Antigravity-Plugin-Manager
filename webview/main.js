@@ -1,4 +1,9 @@
-const vscode = acquireVsCodeApi();
+const vscode = window.desktopApi || (typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : {
+  postMessage: (msg) => console.warn('No bridge available for postMessage', msg)
+});
+if (typeof window !== 'undefined' && !window.vscode) {
+  window.vscode = vscode;
+}
 
 // Global Webview Client Error Logger
 window.onerror = function(message, source, lineno, colno, error) {
@@ -45,6 +50,11 @@ let conflictsList = [];
 let connectedFoldersList = [];
 let updatesData = null;
 let targetUpdatePlugin = null;
+let antigravityProjectsList = [];
+let customFoldersList = [];
+let activeProjectId = null;
+let multiRootTargetMode = 'primary'; // 'primary' | 'all' | 'specific'
+let multiRootSpecificFolder = null;
 
 let currentTab = 'active';
 let activePluginId = null;
@@ -66,6 +76,126 @@ function toggleConfigReposSection() {
   if (chevron) chevron.classList.toggle('collapsed', isConfigReposCollapsed);
 }
 window.toggleConfigReposSection = toggleConfigReposSection;
+
+function renderAntigravityProjectsSelector() {
+  const container = document.getElementById('project-selector-container');
+  const select = document.getElementById('antigravity-project-select');
+  if (!container || !select) return;
+
+  const hasNative = antigravityProjectsList && antigravityProjectsList.length > 0;
+  const hasCustom = customFoldersList && customFoldersList.length > 0;
+
+  if (!hasNative && !hasCustom) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+
+  let html = '';
+  // 1. Option for "No project (Global context only)"
+  const isNoneSel = !activeProjectId ? 'selected' : '';
+  html += `<option value="" ${isNoneSel} style="background-color: #181825; color: #94a3b8;">${escapeHtml(t('noProjectGlobalOnly', '🌐 Без проекта (только глобальный контекст)'))}</option>`;
+
+  // 2. Native Antigravity Projects group
+  if (hasNative) {
+    html += `<optgroup label="${escapeHtml(t('antigravityProjectsGroup', 'Проекты Antigravity'))}">`;
+    antigravityProjectsList.forEach(p => {
+      const isSel = p.id === activeProjectId ? 'selected' : '';
+      const folderCount = p.folders ? p.folders.length : 1;
+      const countTag = folderCount > 1 ? ` (${folderCount})` : '';
+      html += `<option value="${escapeQuotes(p.id)}" ${isSel} style="background-color: #181825; color: #f8fafc;">${escapeHtml(p.name)}${countTag}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+
+  // 3. Custom Folders group
+  if (hasCustom) {
+    html += `<optgroup label="${escapeHtml(t('customFoldersGroup', 'Пользовательские папки'))}">`;
+    customFoldersList.forEach(c => {
+      const isSel = c.id === activeProjectId ? 'selected' : '';
+      html += `<option value="${escapeQuotes(c.id)}" ${isSel} style="background-color: #181825; color: #a5b4fc;">📁 ${escapeHtml(c.name)} [${t('badgeCustomFolder', 'Пользовательская')}]</option>`;
+    });
+    html += `</optgroup>`;
+  }
+
+  // 4. Action: Choose custom folder
+  html += `<option value="__browse_folder__" style="background-color: #1e1e2e; color: #38bdf8; font-weight: 600;">${escapeHtml(t('optChooseCustomFolder', '📂 + Выбрать другую папку...'))}</option>`;
+
+  select.innerHTML = html;
+}
+
+function switchAntigravityProject(projectId) {
+  if (projectId === '__browse_folder__') {
+    renderAntigravityProjectsSelector();
+    vscode.postMessage({
+      command: 'chooseCustomWorkspaceFolder'
+    });
+    return;
+  }
+
+  activeProjectId = projectId || null;
+  document.body.classList.add('loading');
+  vscode.postMessage({
+    command: 'switchAntigravityProject',
+    projectId: activeProjectId
+  });
+}
+
+function refreshAntigravityProjects(btnEl) {
+  if (btnEl) {
+    const icon = btnEl.querySelector('.refresh-spin-icon');
+    if (icon) icon.classList.add('rotating');
+  }
+  vscode.postMessage({
+    command: 'refreshAntigravityProjects'
+  });
+}
+
+function changeMultiRootTargetMode(mode) {
+  multiRootTargetMode = mode;
+  const specificSelect = document.getElementById('multi-root-specific-folder-select');
+  if (specificSelect) {
+    specificSelect.style.display = mode === 'specific' ? 'inline-block' : 'none';
+  }
+}
+
+function changeMultiRootSpecificFolder(folderPath) {
+  multiRootSpecificFolder = folderPath;
+}
+
+function renderMultiRootTargetControls() {
+  const row = document.getElementById('multi-root-target-row');
+  const modeSelect = document.getElementById('multi-root-target-mode');
+  const specSelect = document.getElementById('multi-root-specific-folder-select');
+  if (!row) return;
+
+  if (!workspaceFoldersList || workspaceFoldersList.length <= 1) {
+    row.style.display = 'none';
+    return;
+  }
+
+  row.style.display = 'flex';
+  if (modeSelect) modeSelect.value = multiRootTargetMode;
+
+  if (specSelect) {
+    specSelect.style.display = multiRootTargetMode === 'specific' ? 'inline-block' : 'none';
+    specSelect.innerHTML = workspaceFoldersList.map((w, idx) => {
+      const isSel = (multiRootSpecificFolder ? w.fsPath === multiRootSpecificFolder : idx === 0) ? 'selected' : '';
+      return `<option value="${escapeQuotes(w.fsPath)}" ${isSel} style="background-color: #181825; color: #f8fafc;">${escapeHtml(w.name)}</option>`;
+    }).join('');
+    if (!multiRootSpecificFolder && workspaceFoldersList.length > 0) {
+      multiRootSpecificFolder = workspaceFoldersList[0].fsPath;
+    }
+  }
+}
+
+window.renderAntigravityProjectsSelector = renderAntigravityProjectsSelector;
+window.switchAntigravityProject = switchAntigravityProject;
+window.refreshAntigravityProjects = refreshAntigravityProjects;
+window.changeMultiRootTargetMode = changeMultiRootTargetMode;
+window.changeMultiRootSpecificFolder = changeMultiRootSpecificFolder;
+window.renderMultiRootTargetControls = renderMultiRootTargetControls;
 
 function getActiveWorkspaceRoot() {
   if (selectedWorkspaceRoot && workspaceFoldersList.some(w => w.fsPath === selectedWorkspaceRoot)) {
@@ -89,6 +219,7 @@ function renderWorkspaceSelector() {
   if (!workspaceFoldersList || workspaceFoldersList.length === 0) {
     blockEl.style.display = 'none';
     selectedWorkspaceRoot = null;
+    renderMultiRootTargetControls();
     return;
   }
 
@@ -104,6 +235,7 @@ function renderWorkspaceSelector() {
     if (selectEl) selectEl.style.display = 'none';
     if (helpEl) helpEl.style.display = 'none';
     if (hintEl) hintEl.style.display = 'none';
+    renderMultiRootTargetControls();
     return;
   }
 
@@ -126,7 +258,7 @@ function renderWorkspaceSelector() {
       const isSelected = w.fsPath === selectedWorkspaceRoot ? 'selected' : '';
       const isPrimary = idx === 0;
       const primaryTag = isPrimary ? ` [${t('workspacePrimaryTag', 'Основной')}]` : '';
-      return `<option value="${escapeQuotes(w.fsPath)}" ${isSelected}>${escapeHtml(w.name)}${primaryTag}</option>`;
+      return `<option value="${escapeQuotes(w.fsPath)}" ${isSelected} style="background-color: #181825; color: #f8fafc;">${escapeHtml(w.name)}${primaryTag}</option>`;
     }).join('');
 
     selectEl.onchange = (e) => {
@@ -135,6 +267,8 @@ function renderWorkspaceSelector() {
       renderCurrentTab();
     };
   }
+
+  renderMultiRootTargetControls();
 }
 
 // DOM Elements
@@ -382,6 +516,11 @@ window.addEventListener('message', event => {
       workspaceFoldersList = message.workspaceFolders || [];
       conflictsList = message.conflicts || [];
       connectedFoldersList = message.connectedFolders || [];
+      if (message.antigravityProjects !== undefined) {
+        antigravityProjectsList = message.antigravityProjects || [];
+        customFoldersList = message.customFolders || [];
+        activeProjectId = message.activeProjectId;
+      }
       if (message.liveContext) {
         window.currentLiveContext = message.liveContext;
       }
@@ -392,6 +531,7 @@ window.addEventListener('message', event => {
       clearAllItemLoaders();
       
       try {
+        try { renderAntigravityProjectsSelector(); } catch (e) { console.error('renderAntigravityProjectsSelector error:', e); }
         try { renderConnectedFolders(); } catch (e) { console.error('renderConnectedFolders error:', e); }
         try { renderWorkspaceSelector(); } catch (e) { console.error('renderWorkspaceSelector error:', e); }
         try { renderConflicts(); } catch (e) { console.error('renderConflicts error:', e); }
@@ -826,9 +966,18 @@ function togglePluginProject(workspaceRoot, pluginPath, pluginId, action) {
   const etaMs = calculatePluginSyncEta(pluginId, isEnabling);
   setSyncingState(etaMs, isEnabling ? count : 0);
 
+  let effectiveWsRoot = workspaceRoot;
+  let targetMode = multiRootTargetMode || 'primary';
+  if (workspaceFoldersList && workspaceFoldersList.length > 1) {
+    if (targetMode === 'specific' && multiRootSpecificFolder) {
+      effectiveWsRoot = multiRootSpecificFolder;
+    }
+  }
+
   vscode.postMessage({
     command: 'togglePluginProject',
-    workspaceRoot: workspaceRoot,
+    workspaceRoot: effectiveWsRoot,
+    targetMode: (workspaceFoldersList && workspaceFoldersList.length > 1) ? targetMode : undefined,
     pluginPath: pluginPath,
     id: pluginId,
     action: action,
@@ -848,9 +997,19 @@ window.toggleSkillGlobal = toggleSkillGlobal;
 
 function toggleSkillProject(workspaceRoot, skillPath, skillId, action) {
   setSyncingState(2100);
+
+  let effectiveWsRoot = workspaceRoot;
+  let targetMode = multiRootTargetMode || 'primary';
+  if (workspaceFoldersList && workspaceFoldersList.length > 1) {
+    if (targetMode === 'specific' && multiRootSpecificFolder) {
+      effectiveWsRoot = multiRootSpecificFolder;
+    }
+  }
+
   vscode.postMessage({
     command: 'toggleSkillProject',
-    workspaceRoot: workspaceRoot,
+    workspaceRoot: effectiveWsRoot,
+    targetMode: (workspaceFoldersList && workspaceFoldersList.length > 1) ? targetMode : undefined,
     physicalPath: skillPath,
     id: skillId,
     action: action

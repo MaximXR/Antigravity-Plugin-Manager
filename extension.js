@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { getTranslation, translations } = require('./locales/translations');
 const {
+  getWebviewScript,
   logDebug,
   getActiveLanguage,
   getActivePluginsPath,
@@ -1915,11 +1916,10 @@ function getHtmlContentShared(webview, context, lang) {
   const extPath = context && context.extensionPath ? context.extensionPath : __dirname;
   const htmlPath = path.join(extPath, 'webview', 'index.html');
   const cssPath = path.join(extPath, 'webview', 'style.css');
-  const jsPath = path.join(extPath, 'webview', 'main.js');
 
   let html = fs.readFileSync(htmlPath, 'utf8');
   const css = fs.readFileSync(cssPath, 'utf8');
-  const js = fs.readFileSync(jsPath, 'utf8');
+  const js = getWebviewScript(path.join(extPath, 'webview'));
 
   const configLang = vscode.workspace.getConfiguration('antigravity-plugin-manager').get('language', 'auto');
   

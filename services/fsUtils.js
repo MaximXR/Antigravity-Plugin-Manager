@@ -1,4 +1,9 @@
-const vscode = require('vscode');
+let vscode;
+try {
+  vscode = require('vscode');
+} catch (e) {
+  vscode = require('./vscodeShim');
+}
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -524,6 +529,46 @@ function getSkillMdPath(skillDir) {
   return null;
 }
 
+// Antigravity customization folder discovery (.agents, .agent, _agents, _agent)
+function getWorkspaceCustomizationDirs(wsRoot) {
+  if (!wsRoot) return [];
+  const candidates = ['.agents', '.agent', '_agents', '_agent'];
+  const found = [];
+  for (const c of candidates) {
+    const fullP = path.join(wsRoot, c);
+    try {
+      if (fs.existsSync(fullP) && fs.statSync(fullP).isDirectory()) {
+        found.push(fullP);
+      }
+    } catch (_) {}
+  }
+  return found;
+}
+
+// Recursive Markdown file collector (for rules with subdirectories)
+function getMarkdownFilesRecursive(dirPath, baseDir = dirPath) {
+  const mdFiles = [];
+  if (!fs.existsSync(dirPath)) return mdFiles;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullP = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        mdFiles.push(...getMarkdownFilesRecursive(fullP, baseDir));
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        mdFiles.push({
+          fullPath: fullP,
+          name: entry.name,
+          relPath: path.relative(baseDir, fullP)
+        });
+      }
+    }
+  } catch (e) {
+    logDebug(`getMarkdownFilesRecursive error in ${dirPath}: ${e.message}`);
+  }
+  return mdFiles;
+}
+
 function readPluginInfo(pluginDir) {
   const name = path.basename(pluginDir);
   const pluginJsonPath = path.join(pluginDir, 'plugin.json');
@@ -579,39 +624,64 @@ function readPluginInfo(pluginDir) {
   }
   skills.sort((a, b) => a.displayName.localeCompare(b.displayName));
   
-  // Scan rules in plugin
+  // Scan rules in plugin (recursive inside rules/ and check plugin-root rule files)
   const rules = [];
   const rulesPath = path.join(pluginDir, 'rules');
   if (fs.existsSync(rulesPath)) {
     try {
-      const entries = fs.readdirSync(rulesPath, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isFile() && entry.name.endsWith('.md')) {
-          const rPath = path.join(rulesPath, entry.name);
-          let desc = '';
-          try {
-            const content = fs.readFileSync(rPath, 'utf8');
-            const fm = parseFrontmatter(content);
-            if (fm.description) {
-              desc = fm.description;
-            } else {
-              const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('---'));
-              if (lines.length > 0) desc = lines[0].slice(0, 150);
-            }
-          } catch (e) {}
-          rules.push({
-            id: entry.name,
-            name: path.basename(entry.name, path.extname(entry.name)),
-            displayName: path.basename(entry.name, path.extname(entry.name)),
-            description: desc,
-            physicalPath: rPath
-          });
-        }
+      const mdFiles = getMarkdownFilesRecursive(rulesPath);
+      for (const item of mdFiles) {
+        let desc = '';
+        try {
+          const content = fs.readFileSync(item.fullPath, 'utf8');
+          const fm = parseFrontmatter(content);
+          if (fm.description) {
+            desc = fm.description;
+          } else {
+            const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('---'));
+            if (lines.length > 0) desc = lines[0].slice(0, 150);
+          }
+        } catch (e) {}
+        const relNorm = item.relPath.replace(/\\/g, '/');
+        rules.push({
+          id: relNorm,
+          name: item.name,
+          displayName: item.relPath !== item.name ? item.relPath : item.name,
+          description: desc,
+          physicalPath: item.fullPath
+        });
       }
     } catch (e) {
       logDebug(`Error scanning rules in plugin ${name}: ${e.message}`);
     }
   }
+
+  // Scan root rule files in plugin directory (strictly AGENTS.md and GEMINI.md per Antigravity spec)
+  const pluginRootRuleCandidates = ['AGENTS.md', 'GEMINI.md'];
+  for (const rFile of pluginRootRuleCandidates) {
+    const rPath = path.join(pluginDir, rFile);
+    if (fs.existsSync(rPath) && !rules.some(r => r.physicalPath.toLowerCase() === rPath.toLowerCase())) {
+      let desc = '';
+      try {
+        const content = fs.readFileSync(rPath, 'utf8');
+        const fm = parseFrontmatter(content);
+        if (fm.description) {
+          desc = fm.description;
+        } else {
+          const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('---'));
+          if (lines.length > 0) desc = lines[0].slice(0, 150);
+        }
+      } catch (e) {}
+      rules.push({
+        id: rFile,
+        name: rFile,
+        displayName: rFile,
+        description: desc,
+        physicalPath: rPath
+      });
+    }
+  }
+
   rules.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   // Scan hooks in plugin
@@ -816,10 +886,26 @@ function getGlobalSkillsJsonPath() {
 }
 
 function getWorkspacePluginConfigPath(wsRoot) {
+  if (!wsRoot) return '';
+  const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+  for (const cDir of customDirs) {
+    const pJson = path.join(cDir, 'plugins.json');
+    if (fs.existsSync(pJson)) return pJson;
+  }
+  const rootJson = path.join(wsRoot, 'plugins.json');
+  if (fs.existsSync(rootJson)) return rootJson;
   return path.join(wsRoot, '.agents', 'plugins.json');
 }
 
 function getWorkspaceSkillConfigPath(wsRoot) {
+  if (!wsRoot) return '';
+  const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+  for (const cDir of customDirs) {
+    const sJson = path.join(cDir, 'skills.json');
+    if (fs.existsSync(sJson)) return sJson;
+  }
+  const rootJson = path.join(wsRoot, 'skills.json');
+  if (fs.existsSync(rootJson)) return rootJson;
   return path.join(wsRoot, '.agents', 'skills.json');
 }
 
@@ -1115,6 +1201,24 @@ function touchAntigravityConfigs() {
   }
 }
 
+function triggerIdeScannerFlush(workspaceRoots = null) {
+  try {
+    touchAntigravityConfigs();
+    if (workspaceRoots && Array.isArray(workspaceRoots)) {
+      const now = new Date();
+      for (const root of workspaceRoots) {
+        if (!root) continue;
+        const p1 = getWorkspacePluginConfigPath(root);
+        const p2 = getWorkspaceSkillConfigPath(root);
+        if (fs.existsSync(p1)) { try { fs.utimesSync(p1, now, now); } catch (_) {} }
+        if (fs.existsSync(p2)) { try { fs.utimesSync(p2, now, now); } catch (_) {} }
+      }
+    }
+  } catch (e) {
+    logDebug(`triggerIdeScannerFlush error: ${e.message}`);
+  }
+}
+
 // Ensures that the default global plugins folder (~/.gemini/config/plugins) is preserved
 // in plugins.json.entries when external plugin repositories are configured.
 // Without this, Antigravity IDE's scanner shadows/ignores ~/.gemini/config/plugins.
@@ -1325,7 +1429,39 @@ function migrateFromLegacyStorage(context) {
   }
 }
 
+/**
+ * Assembles webview script content from modular webview/js/ directory,
+ * falling back to webview/main.js if webview/js/ is not present.
+ */
+function getWebviewScript(webviewDir) {
+  const jsDir = path.join(webviewDir, 'js');
+  if (fs.existsSync(jsDir)) {
+    const modules = [
+      'state.js',
+      'syncEta.js',
+      'ipc.js',
+      'controls.js',
+      'actions.js',
+      'cards.js',
+      'pluginDetails.js',
+      'activeContext.js',
+      'modals.js',
+      'main.js'
+    ];
+    return modules
+      .filter((m) => fs.existsSync(path.join(jsDir, m)))
+      .map((m) => fs.readFileSync(path.join(jsDir, m), 'utf8'))
+      .join('\n\n');
+  }
+  const fallbackPath = path.join(webviewDir, 'main.js');
+  if (fs.existsSync(fallbackPath)) {
+    return fs.readFileSync(fallbackPath, 'utf8');
+  }
+  return '';
+}
+
 module.exports = {
+  getWebviewScript,
   logDebug,
   escapeJsString,
   getActiveLanguage,
@@ -1379,8 +1515,11 @@ module.exports = {
   isPathInJsonConfigEntries,
   isNameExcludedInJsonConfig,
   touchAntigravityConfigs,
+  triggerIdeScannerFlush,
   ensureDefaultPluginsFolderInGlobalConfig,
   cleanupDefaultPluginsFolderInGlobalConfig,
-  migrateFromLegacyStorage
+  migrateFromLegacyStorage,
+  getWorkspaceCustomizationDirs,
+  getMarkdownFilesRecursive
 };
 

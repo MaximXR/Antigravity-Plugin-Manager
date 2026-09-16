@@ -319,7 +319,18 @@ const translations = {
     "warnPluginDisableGlobalWhileInProject": "Warning: Plugin \"{plugin}\" is force-enabled in project \"{project}\".\n\nBecause it resides in the default global folder (~/.gemini/config/plugins), disabling it globally will block it in the project \"{project}\" too!\n\nDo you really want to disable it globally?",
     "btnDisablePluginGlobally": "Disable Globally",
     "scopeGlobalShort": "Global",
-    "tooltipGlobalToggle": "Global toggle: sets default state across all workspaces"
+    "tooltipGlobalToggle": "Global toggle: sets default state across all workspaces",
+    "noProjectGlobalOnly": "🌐 No project selected (Global context only)",
+    "refreshProjectsBtn": "Refresh projects list",
+    "optChooseCustomFolder": "📂 + Select other folder...",
+    "badgeCustomFolder": "Custom",
+    "targetFolderMode": "Target folder for configs:",
+    "targetModePrimary": "Primary folder (default)",
+    "targetModeAll": "All folders simultaneously",
+    "targetModeSpecific": "Specific folder...",
+    "customFoldersGroup": "Custom Folders",
+    "antigravityProjectsGroup": "Antigravity Projects",
+    "removeCustomFolder": "Remove folder from list"
   },
   "ru": {
     "title": "Antigravity Plugin & Skill Manager",
@@ -641,7 +652,18 @@ const translations = {
     "warnPluginDisableGlobalWhileInProject": "Внимание: плагин \"{plugin}\" принудительно подключен к проекту \"{project}\".\n\nПоскольку плагин находится в стандартной папке (~/.gemini/config/plugins), его глобальное отключение заблокирует его и в проекте \"{project}\"!\n\nВы действительно хотите отключить его глобально?",
     "btnDisablePluginGlobally": "Отключить глобально",
     "scopeGlobalShort": "Глоб.",
-    "tooltipGlobalToggle": "Глобальный переключатель: задает статус по умолчанию для всех проектов"
+    "tooltipGlobalToggle": "Глобальный переключатель: задает статус по умолчанию для всех проектов",
+    "noProjectGlobalOnly": "🌐 Без проекта (только глобальный контекст)",
+    "refreshProjectsBtn": "Обновить список проектов",
+    "optChooseCustomFolder": "📂 + Выбрать другую папку...",
+    "badgeCustomFolder": "Пользовательская",
+    "targetFolderMode": "Целевая папка для настроек:",
+    "targetModePrimary": "Первая (основная)",
+    "targetModeAll": "Во всех папках сразу",
+    "targetModeSpecific": "Выбранная папка...",
+    "customFoldersGroup": "Пользовательские папки",
+    "antigravityProjectsGroup": "Проекты Antigravity",
+    "removeCustomFolder": "Удалить папку из списка"
   }
 };
 

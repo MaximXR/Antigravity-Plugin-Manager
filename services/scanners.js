@@ -1,4 +1,9 @@
-const vscode = require('vscode');
+let vscode;
+try {
+  vscode = require('vscode');
+} catch (e) {
+  vscode = require('./vscodeShim');
+}
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -23,7 +28,9 @@ const {
   isPatternMatch,
   isAntigravityPluginGloballyEnabled,
   isPathInJsonConfigEntries,
-  isNameExcludedInJsonConfig
+  isNameExcludedInJsonConfig,
+  getWorkspaceCustomizationDirs,
+  getMarkdownFilesRecursive
 } = require('./fsUtils');
 
 // Scan conflicts between active and storage folders (legacy stub, no storage conflicts in native mode)
@@ -198,28 +205,32 @@ function scanPlugins(activePath, workspaceRoots = []) {
   return plugins;
 }
 
-// Scan local workspace plugins: <wsRoot>/.agents/plugins/ and declared in <wsRoot>/.agents/plugins.json
+// Scan local workspace plugins: <wsRoot>/{.agents,.agent,_agents,_agent}/plugins/ and declared in plugins.json
 function scanLocalPlugins(workspaceRoots = [], seenPaths = new Set()) {
   const localPlugins = [];
   if (!workspaceRoots || workspaceRoots.length === 0) return localPlugins;
 
   for (const wsRoot of workspaceRoots) {
     const wsName = path.basename(wsRoot);
-    const wsPluginsPath = path.join(wsRoot, '.agents', 'plugins');
+    const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+    const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
 
-    // 1. Default .agents/plugins folder
-    if (fs.existsSync(wsPluginsPath)) {
-      const found = scanPluginsInDirectory(wsPluginsPath, 'workspace', wsName, workspaceRoots, true, wsName);
-      for (const p of found) {
-        const norm = path.normalize(p.physicalPath).toLowerCase();
-        if (!seenPaths.has(norm)) {
-          seenPaths.add(norm);
-          localPlugins.push(p);
+    // 1. Scan plugins folder in each customization directory
+    for (const cDir of checkDirs) {
+      const wsPluginsPath = path.join(cDir, 'plugins');
+      if (fs.existsSync(wsPluginsPath)) {
+        const found = scanPluginsInDirectory(wsPluginsPath, 'workspace', wsName, workspaceRoots, true, wsName);
+        for (const p of found) {
+          const norm = path.normalize(p.physicalPath).toLowerCase();
+          if (!seenPaths.has(norm)) {
+            seenPaths.add(norm);
+            localPlugins.push(p);
+          }
         }
       }
     }
 
-    // 2. Custom entries in .agents/plugins.json
+    // 2. Custom entries in plugins.json
     const wsPluginsJson = getWorkspacePluginConfigPath(wsRoot);
     if (fs.existsSync(wsPluginsJson)) {
       const configData = readJsonConfigFile(wsPluginsJson);
@@ -418,28 +429,32 @@ function scanSkills(activePath, workspaceRoots = []) {
   return skills;
 }
 
-// Scan local workspace skills: <wsRoot>/.agents/skills/ and declared in <wsRoot>/.agents/skills.json
+// Scan local workspace skills: <wsRoot>/{.agents,.agent,_agents,_agent}/skills/ and declared in skills.json
 function scanLocalSkills(workspaceRoots = [], seenPaths = new Set()) {
   const localSkills = [];
   if (!workspaceRoots || workspaceRoots.length === 0) return localSkills;
 
   for (const wsRoot of workspaceRoots) {
     const wsName = path.basename(wsRoot);
-    const wsSkillsPath = path.join(wsRoot, '.agents', 'skills');
+    const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+    const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
 
-    // 1. Default .agents/skills
-    if (fs.existsSync(wsSkillsPath)) {
-      const found = scanSkillsInDirectory(wsSkillsPath, 'workspace', wsName, workspaceRoots, true, wsName);
-      for (const s of found) {
-        const norm = path.normalize(s.physicalPath).toLowerCase();
-        if (!seenPaths.has(norm)) {
-          seenPaths.add(norm);
-          localSkills.push(s);
+    // 1. Scan skills in each customization directory
+    for (const cDir of checkDirs) {
+      const wsSkillsPath = path.join(cDir, 'skills');
+      if (fs.existsSync(wsSkillsPath)) {
+        const found = scanSkillsInDirectory(wsSkillsPath, 'workspace', wsName, workspaceRoots, true, wsName);
+        for (const s of found) {
+          const norm = path.normalize(s.physicalPath).toLowerCase();
+          if (!seenPaths.has(norm)) {
+            seenPaths.add(norm);
+            localSkills.push(s);
+          }
         }
       }
     }
 
-    // 2. Custom entries in .agents/skills.json
+    // 2. Custom entries in skills.json
     const wsSkillsJson = getWorkspaceSkillConfigPath(wsRoot);
     if (fs.existsSync(wsSkillsJson)) {
       const configData = readJsonConfigFile(wsSkillsJson);
@@ -532,31 +547,43 @@ function scanWorkflows(activePath) {
   return workflows;
 }
 
-// Scan local workspace workflows
-function scanLocalWorkflows() {
+// Scan local workspace workflows: <wsRoot>/{.agents,.agent,_agents,_agent}/workflows/
+function scanLocalWorkflows(workspaceRoots = []) {
   const localWorkflows = [];
-  if (!vscode.workspace.workspaceFolders) return localWorkflows;
+  const roots = (Array.isArray(workspaceRoots) && workspaceRoots.length > 0)
+    ? workspaceRoots.map(r => (typeof r === 'string' ? r : (r.fsPath || (r.uri ? r.uri.fsPath : '')))).filter(Boolean)
+    : (vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders.map(f => f.uri.fsPath) : []);
+
+  if (roots.length === 0) return localWorkflows;
+  const seenPaths = new Set();
   
-  for (const folder of vscode.workspace.workspaceFolders) {
-    const wsRoot = folder.uri.fsPath;
-    const wsWorkflowsPath = path.join(wsRoot, '.agents', 'workflows');
-    if (fs.existsSync(wsWorkflowsPath)) {
-      try {
-        const items = fs.readdirSync(wsWorkflowsPath, { withFileTypes: true });
-        for (const item of items) {
-          if (item.isFile() && item.name.endsWith('.md')) {
-            const workflowFile = path.join(wsWorkflowsPath, item.name);
-            const wfInfo = readWorkflowInfo(workflowFile);
-            wfInfo.id = `local-${folder.name}-${item.name}`;
+  for (const wsRoot of roots) {
+    const wsName = path.basename(wsRoot);
+    const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+    const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
+
+    for (const cDir of checkDirs) {
+      const wsWorkflowsPath = path.join(cDir, 'workflows');
+      if (fs.existsSync(wsWorkflowsPath)) {
+        try {
+          const mdFiles = getMarkdownFilesRecursive(wsWorkflowsPath);
+          for (const item of mdFiles) {
+            const norm = path.normalize(item.fullPath).toLowerCase();
+            if (seenPaths.has(norm)) continue;
+            seenPaths.add(norm);
+
+            const wfInfo = readWorkflowInfo(item.fullPath);
+            const relNorm = item.relPath.replace(/\\/g, '/');
+            wfInfo.id = `local-${wsName}-${relNorm.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
             wfInfo.isEnabled = true;
             wfInfo.isLocal = true;
-            wfInfo.workspaceName = folder.name;
-            wfInfo.physicalPath = workflowFile;
+            wfInfo.workspaceName = wsName;
+            wfInfo.physicalPath = item.fullPath;
             localWorkflows.push(wfInfo);
           }
+        } catch (e) {
+          logDebug(`Error scanning local workflows in ${wsName}: ${e.message}`);
         }
-      } catch (e) {
-        logDebug(`Error scanning local workflows in ${folder.name}: ${e.message}`);
       }
     }
   }
@@ -600,6 +627,7 @@ function scanBuiltinWorkflows() {
 // Scan all rules across Global (strictly 2 files: GEMINI.md & AGENTS.md), Builtin, Workspaces, and Plugins
 function scanAllRules(workspaceRoots, plugins) {
   const allRules = [];
+  const seenRulePaths = new Set();
 
   // 1. Global rules: strictly the 2 files in ~/.gemini
   const homeDir = os.homedir();
@@ -607,6 +635,7 @@ function scanAllRules(workspaceRoots, plugins) {
   const globalAgents = path.join(homeDir, '.gemini', 'AGENTS.md');
 
   if (fs.existsSync(globalGemini)) {
+    seenRulePaths.add(path.normalize(globalGemini).toLowerCase());
     let desc = '';
     try {
       const content = fs.readFileSync(globalGemini, 'utf8');
@@ -628,6 +657,7 @@ function scanAllRules(workspaceRoots, plugins) {
   }
 
   if (fs.existsSync(globalAgents)) {
+    seenRulePaths.add(path.normalize(globalAgents).toLowerCase());
     let desc = '';
     try {
       const content = fs.readFileSync(globalAgents, 'utf8');
@@ -656,29 +686,30 @@ function scanAllRules(workspaceRoots, plugins) {
   for (const bDir of builtinRulesDirs) {
     if (fs.existsSync(bDir)) {
       try {
-        const files = fs.readdirSync(bDir, { withFileTypes: true });
-        for (const f of files) {
-          if (f.isFile() && f.name.endsWith('.md')) {
-            const fullP = path.join(bDir, f.name);
-            let desc = '';
-            try {
-              const c = fs.readFileSync(fullP, 'utf8');
-              const fm = parseFrontmatter(c);
-              desc = fm.description || 'Built-in Antigravity rule';
-            } catch (e) {}
-            allRules.push({
-              id: `builtin-${f.name}`,
-              name: f.name,
-              displayName: `${f.name} (Built-in)`,
-              description: desc,
-              physicalPath: fullP,
-              source: 'builtin',
-              sourceLabel: 'Built-in',
-              isBuiltin: true,
-              isProtected: true,
-              isEnabled: true
-            });
-          }
+        const mdFiles = getMarkdownFilesRecursive(bDir);
+        for (const item of mdFiles) {
+          const normKey = path.normalize(item.fullPath).toLowerCase();
+          if (seenRulePaths.has(normKey)) continue;
+          seenRulePaths.add(normKey);
+
+          let desc = '';
+          try {
+            const c = fs.readFileSync(item.fullPath, 'utf8');
+            const fm = parseFrontmatter(c);
+            desc = fm.description || 'Built-in Antigravity rule';
+          } catch (e) {}
+          allRules.push({
+            id: `builtin-${item.name}`,
+            name: item.name,
+            displayName: `${item.name} (Built-in)`,
+            description: desc,
+            physicalPath: item.fullPath,
+            source: 'builtin',
+            sourceLabel: 'Built-in',
+            isBuiltin: true,
+            isProtected: true,
+            isEnabled: true
+          });
         }
       } catch (e) {}
     }
@@ -689,76 +720,68 @@ function scanAllRules(workspaceRoots, plugins) {
     for (const wsRoot of workspaceRoots) {
       const wsName = path.basename(wsRoot);
 
-      // Root GEMINI.md in workspace
-      const wsGemini = path.join(wsRoot, 'GEMINI.md');
-      if (fs.existsSync(wsGemini)) {
-        let desc = '';
-        try {
-          const content = fs.readFileSync(wsGemini, 'utf8');
-          const fm = parseFrontmatter(content);
-          desc = fm.description || `Project rule in ${wsName}`;
-        } catch (e) {}
-        allRules.push({
-          id: `ws-${wsName}-gemini-md`,
-          name: 'GEMINI.md',
-          displayName: `GEMINI.md (${wsName})`,
-          description: desc,
-          physicalPath: wsGemini,
-          source: 'workspace',
-          sourceLabel: wsName,
-          workspaceName: wsName,
-          isWorkspace: true,
-          isGlobal: false,
-          isProtected: false,
-          isEnabled: true
-        });
+      // Root rule files in workspace (strictly AGENTS.md and GEMINI.md per Antigravity spec)
+      const rootRuleCandidates = ['AGENTS.md', 'GEMINI.md'];
+      for (const rFile of rootRuleCandidates) {
+        const fullP = path.join(wsRoot, rFile);
+        if (fs.existsSync(fullP)) {
+          const normKey = path.normalize(fullP).toLowerCase();
+          if (seenRulePaths.has(normKey)) continue;
+          seenRulePaths.add(normKey);
+
+          let desc = '';
+          try {
+            const content = fs.readFileSync(fullP, 'utf8');
+            const fm = parseFrontmatter(content);
+            desc = fm.description || `Project rule in ${wsName}`;
+          } catch (e) {}
+
+          allRules.push({
+            id: `ws-${wsName}-${rFile.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`,
+            name: rFile,
+            displayName: `${rFile} (${wsName})`,
+            description: desc,
+            physicalPath: fullP,
+            source: 'workspace',
+            sourceLabel: wsName,
+            workspaceName: wsName,
+            isWorkspace: true,
+            isGlobal: false,
+            isProtected: false,
+            isEnabled: true
+          });
+        }
       }
 
-      // Root AGENTS.md in workspace
-      const wsAgents = path.join(wsRoot, 'AGENTS.md');
-      if (fs.existsSync(wsAgents)) {
-        let desc = '';
-        try {
-          const content = fs.readFileSync(wsAgents, 'utf8');
-          const fm = parseFrontmatter(content);
-          desc = fm.description || `Project rule in ${wsName}`;
-        } catch (e) {}
-        allRules.push({
-          id: `ws-${wsName}-agents-md`,
-          name: 'AGENTS.md',
-          displayName: `AGENTS.md (${wsName})`,
-          description: desc,
-          physicalPath: wsAgents,
-          source: 'workspace',
-          sourceLabel: wsName,
-          workspaceName: wsName,
-          isWorkspace: true,
-          isGlobal: false,
-          isProtected: false,
-          isEnabled: true
-        });
-      }
+      // Customization directories in workspace (.agents, .agent, _agents, _agent)
+      const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+      const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
 
-      // .agents/rules/*.md
-      const wsRulesDir = path.join(wsRoot, '.agents', 'rules');
-      if (fs.existsSync(wsRulesDir)) {
-        try {
-          const files = fs.readdirSync(wsRulesDir, { withFileTypes: true });
-          for (const f of files) {
-            if (f.isFile() && f.name.endsWith('.md')) {
-              const fullP = path.join(wsRulesDir, f.name);
+      for (const cDir of checkDirs) {
+        const wsRulesDir = path.join(cDir, 'rules');
+        if (fs.existsSync(wsRulesDir)) {
+          try {
+            const mdFiles = getMarkdownFilesRecursive(wsRulesDir);
+            for (const item of mdFiles) {
+              const normKey = path.normalize(item.fullPath).toLowerCase();
+              if (seenRulePaths.has(normKey)) continue;
+              seenRulePaths.add(normKey);
+
               let desc = '';
               try {
-                const c = fs.readFileSync(fullP, 'utf8');
+                const c = fs.readFileSync(item.fullPath, 'utf8');
                 const fm = parseFrontmatter(c);
                 desc = fm.description || '';
               } catch (e) {}
+
+              const baseFolder = path.basename(cDir);
+              const relNorm = item.relPath.replace(/\\/g, '/');
               allRules.push({
-                id: `ws-${wsName}-${f.name}`,
-                name: f.name,
-                displayName: f.name,
+                id: `ws-${wsName}-${baseFolder}-${relNorm.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+                name: item.name,
+                displayName: item.relPath !== item.name ? `${item.relPath} (${wsName})` : `${item.name} (${wsName})`,
                 description: desc,
-                physicalPath: fullP,
+                physicalPath: item.fullPath,
                 source: 'workspace',
                 sourceLabel: wsName,
                 workspaceName: wsName,
@@ -768,8 +791,10 @@ function scanAllRules(workspaceRoots, plugins) {
                 isEnabled: true
               });
             }
+          } catch (e) {
+            logDebug(`Error scanning rules in ${wsRulesDir}: ${e.message}`);
           }
-        } catch (e) {}
+        }
       }
     }
   }
@@ -779,6 +804,10 @@ function scanAllRules(workspaceRoots, plugins) {
     for (const p of plugins) {
       if (p.rules && p.rules.length > 0) {
         for (const r of p.rules) {
+          const normKey = path.normalize(r.physicalPath).toLowerCase();
+          if (seenRulePaths.has(normKey)) continue;
+          seenRulePaths.add(normKey);
+
           allRules.push({
             id: `plugin-${p.id}-${r.id}`,
             name: r.name,
@@ -865,7 +894,12 @@ function scanAllMcpServers(workspaceRoots, plugins) {
   if (workspaceRoots && workspaceRoots.length > 0) {
     for (const wsRoot of workspaceRoots) {
       const wsName = path.basename(wsRoot);
-      parseMcpFile(path.join(wsRoot, '.agents', 'mcp_config.json'), 'workspace', wsName, true, null, false, false);
+      const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+      const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
+      for (const cDir of checkDirs) {
+        parseMcpFile(path.join(cDir, 'mcp_config.json'), 'workspace', wsName, true, null, false, false);
+      }
+      parseMcpFile(path.join(wsRoot, 'mcp_config.json'), 'workspace', wsName, true, null, false, false);
     }
   }
 
@@ -946,7 +980,12 @@ function scanAllHooks(workspaceRoots, plugins) {
   if (workspaceRoots && workspaceRoots.length > 0) {
     for (const wsRoot of workspaceRoots) {
       const wsName = path.basename(wsRoot);
-      parseHooksFile(path.join(wsRoot, '.agents', 'hooks.json'), 'workspace', wsName, true, null, false, false);
+      const customDirs = getWorkspaceCustomizationDirs(wsRoot);
+      const checkDirs = customDirs.length > 0 ? customDirs : [path.join(wsRoot, '.agents')];
+      for (const cDir of checkDirs) {
+        parseHooksFile(path.join(cDir, 'hooks.json'), 'workspace', wsName, true, null, false, false);
+      }
+      parseHooksFile(path.join(wsRoot, 'hooks.json'), 'workspace', wsName, true, null, false, false);
     }
   }
 

@@ -1,5 +1,29 @@
 # История изменений / Changelog
 
+## 1.2.19
+
+### Русский
+* **Автономное десктопное приложение (AI Skill & Plugin Manager Desktop):**
+  - Выпущена независимая версия приложения на Electron для пользователей стандартного окружения **Antigravity 2.0 (Desktop)** и консоли **Antigravity CLI (`agy`)**.
+  - Работает автономно без запущенного VS Code: панель в системном трее, селектор проектов Antigravity 2.0, быстрое переключение контекста и портативная сборка без установки (`.exe` и `.zip`).
+* **Глубокое обнаружение правил во всех каталогах (Rules Discovery Engine):**
+  - Поддержано сканирование правил во всех 4 вариантах служебных каталогов Antigravity: `.agents/rules/`, `.agent/rules/`, `_agents/rules/` и `_agent/rules/` с рекурсивным поиском во вложенных подпапках (`rules/**/*.md`).
+  - Добавлено обнаружение корневых проектных правил строго по спецификации ядра Antigravity: `AGENTS.md` и `GEMINI.md` в корне рабочего каталога.
+  - Добавлено обнаружение и отображение правил, встроенных в подключенные плагины (каталог `rules/` плагина, а также корневые `AGENTS.md` и `GEMINI.md` плагина).
+* **Автоматическое определение рабочего проекта в Desktop:**
+  - При запуске десктопное приложение мгновенно определяет и активирует текущий проект (из аргументов командной строки, сохраненной конфигурации или системного реестра `app_storage.json`), подгружая локальные навыки, правила и воркспейсы.
+
+### English
+* **Standalone Desktop Release (AI Skill & Plugin Manager Desktop):**
+  - Released the standalone Electron application for users of **Antigravity 2.0 (Desktop)** and **Antigravity CLI (`agy`)**.
+  - Functions completely independently of VS Code: system tray integration, Antigravity 2.0 project switcher, fast context management, and portable single-executable distribution (`.exe` and `.zip`).
+* **Comprehensive Rules Discovery Engine:**
+  - Full support for all 4 Antigravity customization folder variants: `.agents/rules/`, `.agent/rules/`, `_agents/rules/`, and `_agent/rules/` with recursive subdirectory scanning (`rules/**/*.md`).
+  - Added native detection of workspace root rules adhering to the Antigravity core standard: `AGENTS.md` and `GEMINI.md`.
+  - Added discovery and live display of rules bundled inside connected plugins (scanning plugin `rules/` directory, as well as root `AGENTS.md` and `GEMINI.md`).
+* **Workspace Auto-Hydration in Desktop App:**
+  - On launch, the Desktop app automatically resolves and activates the current project workspace (from CLI flags, saved settings, or `app_storage.json`), immediately displaying local skills, rules, and workflows.
+
 ## 1.2.18
 
 ### Русский

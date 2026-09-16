@@ -3,10 +3,13 @@
 .vscodeignore
 *.vsix
 dist/**
-build.bat
+build*.bat
 plugin_manager_debug.log
 .agents/**
 *.env*
 .env.ovsx
 temp_resources/**
 drafts/**
+desktop/**
+test/**
+core/**

@@ -5,9 +5,19 @@
 
 ---
 
-## 1. Обзор архитектуры проекта
+## 1. Обзор архитектуры проекта и двусоставная структура (Dual Ecosystem)
 
-**Antigravity Plugin Manager** — расширение для IDE Antigravity (VS Code Fork), предоставляющее графический интерфейс для управления модулями расширения контекста ИИ:
+Проект **Antigravity Plugin Manager** развивается в рамках двух тесно связанных рабочих областей (workspaces):
+1. **IDE Extension (`Antigravity Plugin Manager`)** — расширение для IDE Antigravity (VS Code Fork). Предоставляет встроенную вкладку управления контекстом внутри окна редактора.
+2. **Desktop Standalone App (`AI Skill & Plugin Manager Desktop`)** — автономное настольное приложение на базе Electron для пользователей десктопного окружения **Antigravity 2.0 (Desktop)**, консоли **Antigravity CLI (`agy`)**, а также будущих сред Claude Code и Codex.
+
+### Разделение ответственности сканеров (Scanner Separation)
+Чтобы избежать путаницы между контекстами окна IDE и десктопными проектами:
+- **Чистые сканеры ядра ([/services/scanners.js](/services/scanners.js))**: платформо-независимые модули, принимающие массив каталогов `validRoots` и сканирующие `.agents/`, системные и глобальные ресурсы. Не знают ничего об Electron, `app_storage.json` или окнах VS Code.
+- **Сканер расширения IDE (`extension.js`)**: получает рабочие папки строго из активного окна редактора (`vscode.workspace.workspaceFolders`).
+- **Сканер проектов Desktop (`desktop/services/projects.js` или `../Desktop/services/projects.js`)**: сканирует реестры проектов Antigravity 2.0 (`~/.gemini/config/projects/`), `app_storage.json` и пользовательские папки (`antigravity_desktop_custom_folders.json`). Используется **исключительно** в Desktop-версии.
+
+Управляемые компоненты:
 1. **Плагины** (Plugins) — бандлы навыков, правил, хуков и MCP.
 2. **Навыки** (Skills) — автономные каталоги с инструкциями `SKILL.md`.
 3. **Воркфлоу** (Workflows) — пошаговые markdown-сценарии.
@@ -25,15 +35,17 @@
 ├── package.json               # Манифест расширения, команды, настройки, зависимости
 ├── package.nls.json           # Локализация манифеста (английский)
 ├── package.nls.ru.json        # Локализация манифеста (русский)
-├── build.bat                  # Скрипт сборки VSIX-пакета в dist/
+├── build.bat                  # Унифицированный диспетчер сборки (build.bat [ide|desktop|all])
+├── build-desktop.bat          # Прямой ярлык сборки десктопного приложения (.exe)
+├── build-ide.bat              # Прямой ярлык сборки расширения IDE (.vsix)
 ├── README.md                  # Документация для пользователей
 ├── CHANGELOG.md               # История изменений и релизов
 ├── LICENSE                    # Лицензия проекта (MIT)
 ├── .vscodeignore              # Исключения для упаковки vsce
 ├── .gitignore                 # Исключения для Git
 │
-├── services/                  # Сервисный слой бэкенда
-│   ├── fsUtils.js             # Системные пути, safeMoveDir, ссылки (Junctions/Links), парсер frontmatter
+├── services/                  # Сервисный слой бэкенда (SSOT ядра)
+│   ├── fsUtils.js             # Системные пути, getWebviewScript, safeMoveDir, парсер frontmatter
 │   ├── scanners.js            # Сканирование ресурсов (плагины, навыки, сценарии, правила, MCP, хуки)
 │   ├── updater.js             # Движок проверки обновлений (GitHub Raw HEAD) и доставки через Git
 │   └── actions.js             # Мутации: toggleItem, createItem, deleteItem, moveItem, toggleHook
@@ -41,42 +53,80 @@
 ├── webview/                   # Фронтенд интерфейса управления
 │   ├── index.html             # HTML-разметка с плейсхолдерами локализации {{t.key}}
 │   ├── style.css              # CSS-стили (сетки, вкладки, бейджи, модальные окна)
-│   └── main.js                # Клиентский JS (рендеринг, фильтрация, события, IPC)
+│   ├── main.js                # Легаси/фолбек бандл скрипта
+│   └── js/                    # Модульная архитектура Zero-Bundler (динамическая склейка в памяти)
+│       ├── state.js           # Мост vscode, массивы данных (pluginsData...), t(), copyText(), escape
+│       ├── syncEta.js         # Расчет времени синхронизации (calculatePluginSyncEta), ETA-таймер
+│       ├── ipc.js             # Слушатель window.message, диспетчеризация ответов от бэкенда
+│       ├── controls.js        # Проекты, папки, переключение вкладок (switchTab), Soft Apply
+│       ├── actions.js         # Мутации тумблеров, перенос, удаление, редактирование метаданных
+│       ├── pluginDetails.js   # Детали плагина, Hero card, списки ресурсов (skills, rules, MCP...)
+│       ├── cards.js           # Рендереры карточек ресурсов (renderPluginCard...), getStatusPillHtml
+│       ├── activeContext.js   # Дашборд вкладки «Активное», 6 сворачиваемых категорий
+│       ├── modals.js          # Конфликты, создание (визард), обновления, Live context
+│       └── main.js            # Точка входа, режимы вида, привязка событий DOM
 │
 ├── locales/                   # Словарь локализации веб-интерфейса
 │   └── translations.js        # Полный словарь строк на RU и EN (экспорт в window.I18N)
 │
 ├── resources/                 # Статические ассеты
-│   ├── icon.png               # Иконка расширения
+│   ├── icon.png               # Исходная иконка приложения (PNG)
+│   ├── icon.ico               # Сконвертированная Windows multi-layer иконка (ICO)
 │   ├── plugin-manager-just-toggle.svg # Иконка вкладки в Activity Bar
 │   └── screenshot-*.png       # Скриншоты интерфейса для README
 │
-├── dist/                      # Собранные установочные пакеты .vsix
+├── desktop/                   # Автономное десктоп-приложение Electron (AI Skill & Plugin Manager Desktop)
+│   ├── package.json           # Манифест Electron и сборщика electron-builder (вывод в ../dist)
+│   ├── main.js                # Главный процесс Electron (трей, окно, single instance, headless smoke)
+│   ├── preload.js             # Мост contextBridge (desktopApi)
+│   ├── start.bat              # Запуск десктопа в 1 клик
+│   ├── services/
+│   │   └── projects.js        # Сканер проектов Antigravity 2.0 и файловый вотчер
+│   └── test/                  # Инфраструктура автотестов
+│
+├── dist/                      # Собранные пакеты: .vsix, .zip (для GitHub Release), Portable .exe и win-unpacked/
 ├── docs/                      # Инженерная документация и база знаний
-│   └── ANTIGRAVITY_CUSTOMIZATION_ENGINE.md # Архитектура движка, семантика exclude и матрица тестов
+│   ├── ANTIGRAVITY_CUSTOMIZATION_ENGINE.md # Архитектура движка, семантика exclude и матрица тестов
+│   └── PLAN_DESKTOP_BUILD_AND_REFACTORING.md # План архитектурного рефакторинга и сборки
 └── drafts/                    # Черновики и заметки к будущим релизам
 ```
 
 ---
 
-## 3. Маршрутизатор задач для ИИ (Куда лезть при тех или иных задачах)
+## 3. Руководство по эффективному поиску кода для ИИ (Windows Tool Protocol)
+
+> **КРИТИЧЕСКОЕ ПРАВИЛО ПОИСКА НА WINDOWS:**
+> При использовании инструмента `grep_search` в среде Windows **запрещено** передавать абсолютный путь к конкретному файлу в параметр `SearchPath` (например, `SearchPath: "E:\\...\\main.js"`). Из-за особенностей нормализации путей Windows в ripgrep такой вызов возвращает `No results found` даже при наличии точных совпадений!
+> 
+> **Правильный паттерн поиска:**
+> - `SearchPath`: указывать **каталог** (например, `E:\\Antigravity\\Antigravity Plugin Manager\\webview`).
+> - `Includes`: указывать маску файла (например, `["**/cards.js"]` или `["**/main.js"]`).
+> - `MatchPerLine: true`: для получения точных номеров строк и фрагментов кода за 30–50 мс.
+
+---
+
+## 4. Маршрутизатор задач для ИИ (Куда лезть при тех или иных задачах)
 
 | Задача | Файлы для изменения | Что делать / Инструкция |
 | :--- | :--- | :--- |
 | **Добавить/изменить сканирование файлов или обнаружение** | [/services/scanners.js](/services/scanners.js) | Функции `scan*` (`scanPlugins`, `scanSkills`, `scanBuiltin*`, `scanAllRules`, `scanAllMcpServers`, `scanAllHooks`). Логика обнаружения и фильтрации находится здесь. |
-| **Изменить механизм путей, ссылок или парсинга YAML/JSON** | [/services/fsUtils.js](/services/fsUtils.js) | Функции путей `getActive*Path`, `getBuiltinPath`, `safeMoveDir`, `createLink`, `parseFrontmatter`, `readPluginInfo`. |
-| **Изменить операции включения/выключения, создания, удаления, перемещения** | [/services/actions.js](/services/actions.js) | Функции `toggleItem`, `createItem`, `deleteItem`, `moveItem`, `toggleHook`. Помнить: для плагинов активное состояние — физическая папка в `plugins/`, Junction — в `storage`. |
-| **Изменить проверку или доставку обновлений плагинов** | [/services/updater.js](/services/updater.js), [/extension.js](/extension.js), [/webview/main.js](/webview/main.js) | Функции `checkPluginUpdate`, `checkAllUpdates`, `updatePlugin`. Логика парсинга репозиториев, сравнения semver и гибридной доставки через Git. |
-| **Добавить новый бэкенд-метод или IPC команду** | [/extension.js](/extension.js), [/services/actions.js](/services/actions.js), [/webview/main.js](/webview/main.js) | В `extension.js` добавить `case 'commandName'` в `setupWebviewMessagingShared`. Вынести логику в `services/actions.js`. В `main.js` вызвать `vscode.postMessage({ command: 'commandName', ... })`. |
+| **Изменить механизм путей, ссылок или сборки скриптов** | [/services/fsUtils.js](/services/fsUtils.js) | Функции путей `getActive*Path`, `getBuiltinPath`, `getWebviewScript`, `safeMoveDir`, `createLink`, `parseFrontmatter`, `readPluginInfo`. |
+| **Изменить операции включения/выключения, создания, удаления, перемещения** | [/services/actions.js](/services/actions.js) | Функции `toggleItem`, `createItem`, `deleteItem`, `moveItem`, `toggleHook`. Помнить: для плагинов активное состояние — физическая папка в `plugins/`, синхронизация в `plugin.json` и `config.json`. |
+| **Изменить проверку или доставку обновлений плагинов** | [/services/updater.js](/services/updater.js), [/extension.js](/extension.js), [/webview/js/modals.js](/webview/js/modals.js) | Функции `checkPluginUpdate`, `checkAllUpdates`, `updatePlugin`. Логика парсинга репозиториев, сравнения semver и гибридной доставки через Git. |
+| **Добавить новый бэкенд-метод или IPC команду** | [/extension.js](/extension.js), [/desktop/main.js](/desktop/main.js), [/webview/js/ipc.js](/webview/js/ipc.js) | В `extension.js` и `desktop/main.js` добавить `case 'commandName'`. Во фронтенде вызывать `vscode.postMessage({ command: 'commandName', ... })`. |
 | **Изменить разметку или добавить новые блоки в UI** | [/webview/index.html](/webview/index.html) | Добавить HTML-элементы. Тексты оборачивать в плейсхолдеры `{{t.keyName}}`. |
-| **Изменить оформление, шрифты, отступы или анимации** | [/webview/style.css](/webview/style.css) | Редактировать CSS-переменные или классы компонентов (например, `.res-builtin`). |
-| **Изменить клиентскую логику вкладок, поиска, модалок** | [/webview/main.js](/webview/main.js) | Функции `renderList`, `renderDetails`, `openCreateModal`, обработчики событий кнопок и переключателей. |
+| **Изменить оформление, шрифты, отступы или анимации** | [/webview/style.css](/webview/style.css) | Редактировать CSS-переменные или классы компонентов. |
+| **Изменить клиентскую логику карточек, рендеринга или вкладок** | [/webview/js/cards.js](/webview/js/cards.js), [/webview/js/activeContext.js](/webview/js/activeContext.js) | Функции `render*Card`, `getStatusPillHtml`, `getScopeBadgeHtml`, `renderCurrentTab`. |
+| **Изменить модальные окна (создание, конфликты, апдейты)** | [/webview/js/modals.js](/webview/js/modals.js) | Функции `openCreateModal`, `submitCreate`, `resolveConflict`, `openPluginUpdateModal`. |
+| **Изменить селекторы проектов, воркспейсов, Soft Apply** | [/webview/js/controls.js](/webview/js/controls.js) | Функции селектора проектов Antigravity 2.0, переключения скоупа, `triggerSoftApply`. |
 | **Добавить или скорректировать переводы интерфейса** | [/locales/translations.js](/locales/translations.js) | Добавить ключи синхронно в блоки `en` и `ru`. При необходимости обновить `/package.nls.json` и `/package.nls.ru.json`. |
-| **Собрать новый релиз расширения (.vsix)** | [/package.json](/package.json), [/CHANGELOG.md](/CHANGELOG.md), [/build.bat](/build.bat) | Поднять версию в `package.json`, записать изменения в `CHANGELOG.md`, выполнить команду `cmd /c build.bat`. Результат будет в `/dist/`. |
+| **Собрать расширение IDE (.vsix)** | [/package.json](/package.json), [/CHANGELOG.md](/CHANGELOG.md), [/build.bat](/build.bat), [/build-ide.bat](/build-ide.bat) | Поднять версию в `package.json`, выполнить `build-ide.bat` (или `build.bat ide`). Результат в `/dist/`. |
+| **Собрать десктопное приложение (.exe / .zip)** | [/desktop/package.json](/desktop/package.json), [/build.bat](/build.bat), [/build-desktop.bat](/build-desktop.bat) | Выполнить `build-desktop.bat` (или `build.bat desktop`). Результат в `/dist/` (`win-unpacked/`, `.zip` для GitHub и Portable `.exe`). |
+| **Собрать все продукты сразу** | [/build.bat](/build.bat) | Выполнить `build.bat all`. Оба артефакта (.vsix и .exe) соберутся в единый `/dist/`. |
 
 ---
 
-## 4. Важные технические ограничения и паттерны
+## 5. Важные технические ограничения и паттерны
 
 1. **Нативный механизм Antigravity (Native IDE & Desktop Dual Sync Engine):**
    - Для **Antigravity IDE** источником истины активности плагина является манифест `plugin.json` (`"disabled": true/false`).
@@ -131,7 +181,13 @@
    - Разблокирована кнопка перемещения (`→`) для вложенных ресурсов плагинов: их можно переносить между различными плагинами, в глобальные папки или в рабочие проекты.
    - Бейдж плагина (`Плагин: <имя> ↗`) и кнопка в действиях карточки позволяют в 1 клик перейти к управлению плагином с сохранением истории навигации.
    - Кнопка «Открыть в редакторе» (`openFileInEditor`) открывает файл напрямую в VS Code (в соседней колонке `Beside`), автоматически находя `SKILL.md` или `plugin.json` для папок навыков и плагинов.
-9. **Детали плагина (Plugin Details View & Hero Card):**
+9. **Комплексное обнаружение правил и ресурсов Antigravity (Customization Directories & Hierarchical Discovery Engine):**
+   - **4 варианта каталогов проекта**: согласно официальному руководству Antigravity (`agy-customizations`), проектными каталогами кастомизации признаются `.agents/`, `.agent/`, `_agents/`, `_agent/`. Сканеры ядра (`scanners.js` и `fsUtils.js`) автоматически обходят все 4 каталога для правил (`rules/`), навыков (`skills/`), сценариев (`workflows/`), MCP (`mcp_config.json`) и хуков (`hooks.json`).
+   - **Строго 2 имени корневых правил (`AGENTS.md` и `GEMINI.md`)**: согласно нативному поведению Antigravity IDE, файлы вроде `AGENT.md` или `AGENT_RULES.md` движком редактора игнорируются. Корневыми правилами признаются исключительно `AGENTS.md` и `GEMINI.md`.
+   - **Рекурсивное сканирование правил**: правила в `<folder>/rules/` и `plugins/<name>/rules/` сканируются рекурсивно (`rules/**/*.md`), поддерживая структурирование по подпапкам.
+   - **Правила внутри плагинов**: правила из папки `rules/` плагина, а также корневые файлы `AGENTS.md` и `GEMINI.md` плагина автоматически агрегируются в `plugin.rules` и отображаются во вкладке «Правила» и в дашборде «Активное» с привязкой к активности родительского плагина (`p.isEnabled`).
+   - **Авто-восстановление контекста в Desktop**: десктопное приложение при запуске автоматически определяет активный проект Antigravity 2.0 (из `app_storage.json`), сохраненный выбор из конфигурации или аргумент командной строки (CLI `agy-desktop <folder>`), не оставляя пользователя с пустым списком.
+10. **Детали плагина (Plugin Details View & Hero Card):**
    - Липкая шапка `.detail-header` максимально разгружена: содержит только навигацию `[← На главную]` и `[↻ Обновить]`.
    - В теле окна представлена главная карточка плагина (**Plugin Hero Card**, `.plugin-hero-card`):
       - Включает крупную заметную кнопку `[📁 Открыть папку]` (прямой переход внутрь целевой папки в Проводнике Windows через `vscode.env.openExternal` с fallback на прямой вызов проводника ОС), кнопку манифеста `[📄 plugin.json]`, кнопку переноса `[→]` и удаления `[🗑]`.
@@ -332,3 +388,104 @@
 36. **Модальное окно обновления плагинов и отказоустойчивость Git:**
     - В `webview/main.js` исправлена ошибка вызова диалога обновления (`openPluginUpdateModal`): устранено обращение к несуществующей `currentData`, заменено на актуальное состояние `pluginsData` с безопасным fallback по идентификаторам плагина.
     - В `services/updater.js` усилена процедура файловых операций на Windows: функция `copyDirRecursiveSync` и очистка временных каталогов (`safeRemoveDirSync`) автоматически сбрасывают атрибуты только для чтения (read-only) на объектах Git, исключая ошибки `EPERM`/`EACCES` при обновлении плагинов.
+37. **Desktop: Устранение белого экрана при запуске и интеграция с системным редактором ОС:**
+    - **Устранение белого окна (White Screen Flash Elimination)**:
+      - В `desktop/main.js` создание окна переведено в режим отложенного показа (`show: false`) с фоновым цветом `backgroundColor: '#1e1e2e'`. Окно отображается через событие `ready-to-show` (с гарантирующим fallback в `did-finish-load`).
+      - В `webview/index.html` для тегов `<html>` и `<body>` задана инлайн-подложка `background-color: #1e1e2e` и критический `<style>` блок в `<head>`, а класс `loading` на `<body>` удален.
+      - В `webview/style.css` добавлен селектор `html { background-color: #1e1e2e; color-scheme: dark; }`, а `body.loading` переведен на полупрозрачность `0.95` без сплошного белого холста Chromium под ним.
+    - **Открытие файлов в системном редакторе ОС (`openFileInEditor` & `openFile`)**:
+      - В IPC-обработчике `desktop/main.js` зарегистрирована команда `openFileInEditor` и расширен обработчик `openFile`: теперь они извлекают путь из `physicalPath`, `filePath` или `file`.
+      - Добавлено автоматическое разрешение директорий в файлы: для папок навыков автоматически открывается `SKILL.md`, для плагинов — `plugin.json`.
+      - Добавлены алиасы для `openConfigJson`, `openPluginsJson`, `openSkillsJson` и `openAgentsFolder`.
+      - Функция `openFileInDefaultApp` использует `shell.openPath(targetPath)` с автоматическим резервным вызовом `cmd.exe /c start "" <path>`, гарантируя открытие файлов Markdown, JSON и конфигураций в редакторе по умолчанию Windows (VS Code, Notepad, Cursor и др.).
+      - Изолирован режим `--smoke-test`, запускаемый в выделенном временном `userData` каталоге без конфликтов блокировки с работающим экземпляром приложения.
+38. **Zero-Bundler модульность фронтенда (`webview/js/`):**
+    - Ранее монолитный файл `webview/main.js` (более 3500 строк) декомпозирован на 10 независимых изолированных модулей по сферам ответственности:
+      1. `webview/js/state.js` — мост `vscode`, массивы данных (`pluginsData`, `rulesData`...), функции `t()`, `copyText()`, экранирование.
+      2. `webview/js/syncEta.js` — движок расчета ETA синхронизации (`calculatePluginSyncEta`), автовосстановление переключателей, индикаторы.
+      3. `webview/js/ipc.js` — обработчик `window.addEventListener('message')` и диспетчеризация ответов бэкенда.
+      4. `webview/js/controls.js` — селекторы проектов Antigravity 2.0 и папок, переключение вкладок (`switchTab`), Soft Apply, Refresh.
+      5. `webview/js/actions.js` — мутации: тумблеры (`togglePluginGlobal`, `toggleSkillProject`...), перемещение (`moveItem`), удаление, редактирование.
+      6. `webview/js/pluginDetails.js` — окно деталей плагина, Hero Card, списки ресурсов плагина (skills, rules, workflows, mcp, hooks).
+      7. `webview/js/cards.js` — рендереры карточек 6 типов ресурсов (`renderPluginCard`...), бейджи, `getStatusPillHtml`, `renderCurrentTab`.
+      8. `webview/js/activeContext.js` — дашборд «Активное», 6 сворачиваемых категорий ресурсов.
+      9. `webview/js/modals.js` — разрешение конфликтов (`renderConflicts`), визард создания (`openCreateModal`), Live Context, обновление плагинов.
+      10. `webview/js/main.js` — точка входа, режимы отображения (`toggleLayoutMode`...), привязка событий DOM и инициализация.
+    - **Zero-Bundler Loader**: функция `fsUtils.getWebviewScript(webviewDir)` автоматически объединяет модули в памяти в строгой последовательности зависимостей. Отсутствуют внешние сборщики (Webpack/Vite), что гарантирует нулевое время сборки и моментальный hot-reload в Electron и VS Code.
+39. **Сборка десктопной версии Electron в `dist/` и мульти-таргет `build.bat`:**
+    - Скрипт `build.bat` обновлен до универсального мульти-таргет диспетчера:
+      - `build.bat ext` — компиляция пакета расширения VS Code (`.vsix`) через `vsce package`.
+      - `build.bat desktop` — компиляция десктопного приложения (`.exe` NSIS-инсталлятор и Portable) через `electron-builder`.
+      - `build.bat all` (или `build.bat` по умолчанию) — сборка обоих продуктов в единый каталог `dist/`.
+    - **Конфигурация упаковки `electron-builder`**:
+      - Вывод настроен в `"directories": { "output": "../dist" }`.
+      - Для включения общих папок бэкенда применены явные объекты `FileSet` (`{ "from": "../services", "to": "services" }`, `webview`, `locales`, `resources`), так как относительные пути через `..` в виде строк игнорируются фильтром `app-builder-lib`.
+    - **Безопасный резолвер сервисов в Electron (`resolveService`)**:
+      - В упакованном приложении `app.asar` проверка `fs.existsSync(path.join(__dirname, 'services', name))` без расширения `.js` возвращает `false` на Windows.
+      - Функция `resolveService(name)` переведена на безопасный паттерн `try { return require('./services/' + name); } catch { return require('../services/' + name); }`, гарантируя бесперебойную работу сервисов и в режиме разработки, и в собранном `.exe`.
+40. **Глубокое обнаружение правил (Rules Discovery Engine) и автогидратация воркспейса Desktop:**
+    - **Поддержка 4 вариантов каталогов кастомизаций**:
+      - В соответствии со спецификацией ядра Antigravity (`agy-customizations`), ядро распознает 4 варианта папок: `.agents`, `.agent`, `_agents`, `_agent`.
+      - Функция `getWorkspaceCustomizationDirs` и все сканеры (`scanAllRules`, `scanLocalSkills`, `scanLocalWorkflows`, `scanAllMcpServers`, `scanAllHooks`) сканируют все 4 варианта с рекурсивным обходом подкаталогов (`rules/**/*.md`).
+      - Строгое соответствие стандарту корневых правил: ядро Antigravity считывает из корня проекта исключительно `AGENTS.md` и `GEMINI.md` (файлы с другими именами, например `AGENT.md`, игнорируются ядром и не подгружаются в сканере во избежание ложной иллюзии активности).
+    - **Обнаружение правил внутри подключенных плагинов (Plugin Bundled Rules)**:
+      - Функция `readPluginInfo` рекурсивно собирает правила из папки `rules/` плагина, а также корневые `AGENTS.md` и `GEMINI.md` плагина.
+      - В `scanAllRules` правила из активных плагинов включаются в общий пул правил с флагом `isPlugin: true`, отображая родительский плагин и корректный статус активности.
+    - **Автогидратация воркспейса в Desktop (`initDesktopWorkspace`)**:
+      - При старте `desktop/main.js` автоматически инициализирует рабочую область из аргументов командной строки, сохраненного выбора проекта в `antigravity_desktop_config.json` или системного реестра активных проектов `app_storage.json`.
+      - Пользователь сразу видит локальный контекст проекта без необходимости вручную кликать по селектору.
+
+---
+
+## 6. Реестр 45 IPC-команд (Webview <-> Backend)
+
+Взаимодействие фронтенда с бэкендом (IDE Extension и Electron Desktop) полностью стандартизировано через единый протокол сообщений `vscode.postMessage({ command: '...' })` / `window.postMessage`:
+
+| # | Команда IPC | Источник ➔ Назначение | Параметры | Описание и действие |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `refresh` | Webview ➔ Backend | — | Полный повторный сбор данных (`collectAllData`) и обновление всех списков |
+| 2 | `softApplyIde` | Webview ➔ Backend | — | Мягкий перезапуск Language Server IDE (`antigravity.restartLanguageServer`) или обновление десктопа |
+| 3 | `getIdeLiveContext` | Webview ➔ Backend | — | Чтение системного промпта из SQLite БД диалогов Antigravity (`scanIdeLiveContext`) |
+| 4 | `checkUpdates` | Webview ➔ Backend | — | Запрос проверки обновлений всех плагинов через GitHub Raw HEAD |
+| 5 | `updatePlugin` | Webview ➔ Backend | `pluginId`, `physicalPath` | Запуск обновления плагина через `git pull` или `git clone & replace` |
+| 6 | `togglePluginGlobal` | Webview ➔ Backend | `pluginId`, `enable`, `physicalPath` | Глобальное включение/отключение плагина (`plugin.json` + `config.json` + `exclude`) |
+| 7 | `togglePluginProject` | Webview ➔ Backend | `workspaceRoot`, `physicalPath`, `pluginId`, `override` (`reset` / `enable` / `disable`) | Переопределение статуса плагина для конкретного проекта (`.agents/plugins.json`) |
+| 8 | `toggleSkillGlobal` | Webview ➔ Backend | `skillId`, `enable`, `skillName`, `physicalPath` | Глобальное включение/отключение навыка (корневой `exclude` vs `entry.exclude`) |
+| 9 | `toggleSkillProject` | Webview ➔ Backend | `workspaceRoot`, `physicalPath`, `skillName`, `override` (`reset` / `enable` / `disable`) | Переопределение статуса навыка для проекта (`.agents/skills.json`) |
+| 10 | `toggleMcpServer` | Webview ➔ Backend | `physicalPath`, `serverName`, `enabled` | Включение/отключение MCP сервера (поле `"disabled": true` в `mcp_config.json`) |
+| 11 | `toggleHook` | Webview ➔ Backend | `physicalPath`, `hookName`, `enabled` | Включение/отключение хука (поле `"enabled": true/false` в `hooks.json`) |
+| 12 | `toggleItem` | Webview ➔ Backend | `category`, `id`, `enable` | Универсальный тумблер для воркфлоу и правил |
+| 13 | `createItem` | Webview ➔ Backend | `category`, `targetType`, `targetId`, `name`, `displayName`, `description`, `version`, `author`... | Визард создания нового плагина, навыка, воркфлоу или правила |
+| 14 | `deleteItem` | Webview ➔ Backend | `category`, `id`, `name`, `physicalPath` | Удаление компонента с диска (с защитой встроенных и системных файлов) |
+| 15 | `deleteMcpServer` | Webview ➔ Backend | `serverName`, `physicalPath` | Удаление секции MCP сервера из `mcp_config.json` |
+| 16 | `deleteHook` | Webview ➔ Backend | `hookName`, `physicalPath` | Удаление секции хука из `hooks.json` |
+| 17 | `moveItem` | Webview ➔ Backend | `id`, `category`, `pluginId`, `isEnabled`, `isLocal`, `physicalPath` | Вызов меню и физический перенос ресурса между хранилищами (`safeMoveDir`) |
+| 18 | `moveMcpServer` | Webview ➔ Backend | `serverName`, `physicalPath` | Перенос конфигурации MCP сервера между скоупами |
+| 19 | `moveHook` | Webview ➔ Backend | `hookName`, `physicalPath` | Перенос конфигурации хука между скоупами |
+| 20 | `editMetadata` | Webview ➔ Backend | `category`, `id`, `field`, `value` | Инлайн-редактирование `displayName` или `description` в манифесте |
+| 21 | `resolveConflict` | Webview ➔ Backend | `id`, `category`, `resolution`, `activePath`, `storagePath`, `isDir` | Разрешение коллизий файлов между active и storage (`keepActive`, `keepStorage`, `merge`) |
+| 22 | `openFileInEditor` | Webview ➔ Backend | `category`, `filePath`, `serverName` | Открытие файла в редакторе (в IDE — в соседней вкладке, в Desktop — в редакторе по умолчанию ОС) |
+| 23 | `openFile` | Webview ➔ Backend | `physicalPath` / `filePath` / `file` | Алиас открытия произвольного файла в редакторе |
+| 24 | `openFolder` | Webview ➔ Backend | `path` | Открытие указанного каталога в Проводнике Windows |
+| 25 | `openItemFolder` | Webview ➔ Backend | `category`, `id`, `isEnabled`, `isLocal`, `physicalPath` | Открытие папки конкретного элемента в Проводнике |
+| 26 | `openConfigJson` | Webview ➔ Backend | — | Открытие главного конфигурационного файла `~/.gemini/config/config.json` |
+| 27 | `openPluginsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `plugins.json` (глобального или проектного) |
+| 28 | `openSkillsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `skills.json` (глобального или проектного) |
+| 29 | `openAgentsFolder` | Webview ➔ Backend | `workspaceRoot` | Открытие папки `.agents/` текущего проекта в Проводнике |
+| 30 | `openActive` | Webview ➔ Backend | — | Открытие стандартной папки плагинов `~/.gemini/config/plugins/` |
+| 31 | `openActiveSkills` | Webview ➔ Backend | — | Открытие стандартной папки навыков `~/.gemini/config/skills/` |
+| 32 | `openStorage` | Webview ➔ Backend | — | Открытие каталога хранилища |
+| 33 | `selectStorage` | Webview ➔ Backend | — | Выбор пользовательской папки хранилища через диалог ОС |
+| 34 | `connectFolder` | Webview ➔ Backend | `type` (`plugins` / `skills`), `scope` (`global` / `workspace`), `workspaceRoot` | Подключение внешнего каталога с плагинами или навыками в манифест |
+| 35 | `disconnectFolder` | Webview ➔ Backend | `folderPath`, `type`, `scope`, `workspaceRoot` | Безопасное отключение внешней папки из манифеста |
+| 36 | `changeLanguage` | Webview ➔ Backend | `language` (`ru` / `en`) | Смена языка интерфейса и сохранение настройки |
+| 37 | `switchAntigravityProject` | Webview ➔ Desktop | `projectId` | Desktop: выбор активного проекта Antigravity 2.0 или пользовательской папки |
+| 38 | `refreshAntigravityProjects` | Webview ➔ Desktop | — | Desktop: повторное сканирование реестра проектов Antigravity 2.0 |
+| 39 | `chooseCustomWorkspaceFolder` | Webview ➔ Desktop | — | Desktop: диалог открытия папки для добавления в пользовательские проекты |
+| 40 | `switchWorkspaceFolder` | Webview ➔ Extension | `index` | Extension: переключение активной папки в Multi-Root окне VS Code |
+| 41 | `setMultiRootTargetMode` | Webview ➔ Extension | `mode` (`active` / `all` / `specific`) | Extension: режим целевой папки при нескольких корнях в окне |
+| 42 | `setMultiRootSpecificFolder` | Webview ➔ Extension | `folderPath` | Extension: выбор конкретной папки для таргетинга операций |
+| 43 | `updateData` | Backend ➔ Webview | `{ plugins, rules, skills, workflows, mcp, hooks, workspaceRoots... }` | Передача полного снимка данных для рендеринга интерфейса |
+| 44 | `updateStatus` | Backend ➔ Webview | `{ text, isError }` | Передача текстового статуса в нижнюю строку состояния Webview |
+| 45 | `liveContextData` / `updatesChecked` / `updateProgress` / `updateComplete` / `updateFailed` | Backend ➔ Webview | `{ data, updates, progress, error... }` | Асинхронные события движка обновлений и инспектора промпта |
+
