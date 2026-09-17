@@ -81,10 +81,13 @@ Antigravity штатно поддерживает управление акти�
 2. В Antigravity IDE откройте панель расширений (`Ctrl+Shift+X`).
 3. Нажмите на меню с тремя точками `...` в правом верхнем углу панели ➔ **Install from VSIX...** и выберите скачанный файл.
 
-#### Вариант 2: Автономное приложение AI Skill & Plugin Manager Desktop (.exe / .zip)
-1. Скачайте архив `.zip` (или готовый `.exe`) со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**.
-2. Распакуйте архив в любую папку или запустите переносимый исполняемый файл `.exe`.
-3. Приложение готово к работе: оно автоматически определит активный проект Antigravity 2.0 и свернется в трей по закрытию окна.
+#### Вариант 2: Автономное приложение AI Skill & Plugin Manager Desktop (Оба формата портативные!)
+
+Выберите удобный формат со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** (оба варианта не требуют установки и не засоряют систему):
+* ⚡ **Архив `.zip` (Портативный, мгновенный запуск — Рекомендуется):** распакуйте в любую папку и запускайте. Поскольку файлы уже распакованы на диске, приложение стартует молниеносно.
+* 📦 **Одиночный `.exe` (Портативный в один файл):** идеален, чтобы запустить в 1 клик без распаковки архивов или носить с собой на флешке. При старте тихо разворачивается во временную папку ОС (запуск занимает на 1–2 секунды дольше).
+
+Приложение сразу готово к работе: оно автоматически определяет активный проект Antigravity 2.0 и сворачивается в трей по нажатию крестика.
 
 > 💡 **Сборка из исходников:**
 > Склонируйте репозиторий и запустите диспетчер сборки `build.bat` в корне:
@@ -180,10 +183,13 @@ Plugin and skill directories always remain in their original locations. The mana
 2. In Antigravity IDE, open the Extensions panel (`Ctrl+Shift+X`).
 3. Click the `...` menu (top-right corner of the Extensions panel) ➔ **Install from VSIX...** and select the downloaded file.
 
-#### Option 2: Standalone AI Skill & Plugin Manager Desktop (.exe / .zip)
-1. Download the `.zip` archive (or portable `.exe`) from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page.
-2. Unpack the archive to any directory or run the portable `.exe` directly.
-3. The app starts immediately, auto-detects your active Antigravity 2.0 project, and minimizes to the system tray upon closing.
+#### Option 2: Standalone AI Skill & Plugin Manager Desktop (Both Formats Are 100% Portable!)
+
+Choose your preferred format from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page (neither requires installation or admin rights):
+* ⚡ **`.zip` Archive (Portable, Instant Startup — Recommended):** Unpack anywhere and launch. Because all binaries are already unpacked on disk, it opens instantly without delay.
+* 📦 **Single `.exe` (Single-File Portable):** Perfect for USB flash drives or launching in 1 click without extracting. Quietly unpacks into the system temporary folder on startup (takes 1–2 seconds to initialize).
+
+The app starts immediately, auto-detects your active Antigravity 2.0 project, and minimizes to the system tray upon closing.
 
 > 💡 **Build from Source:**
 > Clone the repository and run the unified `build.bat` script in the project root:
