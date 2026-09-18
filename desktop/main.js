@@ -1123,16 +1123,107 @@ ipcMain.on('to-backend', async (event, message) => {
       }
 
       case 'requestMove':
-      case 'moveItem': {
+      case 'requestMoveTargets': {
         if (message.targetDir && message.physicalPath) {
-          const moveRes = await actions.moveItem(message.physicalPath, message.targetDir, activeLanguage);
-          if (!moveRes || !moveRes.success) {
+          // Direct execution if targetDir is already specified
+          const moveRes = await actions.moveItem(message.physicalPath, message.targetDir, {
+            lang: activeLanguage,
+            overwrite: !!message.overwrite,
+            category: message.category,
+            itemId: message.itemId,
+            enableInWorkspaceRoot: message.enableInWorkspaceRoot
+          });
+          if (!moveRes.success) {
+            if (moveRes.conflict) {
+              event.sender.send('from-backend', {
+                command: 'moveConflict',
+                conflict: true,
+                message: moveRes.message,
+                filename: moveRes.filename,
+                targetPath: moveRes.targetPath
+              });
+              return;
+            }
             event.sender.send('from-backend', {
               command: 'error',
-              message: (moveRes && moveRes.message) || 'Protected resource cannot be moved'
+              message: moveRes.message || 'Protected resource cannot be moved'
             });
           } else {
             await fsUtils.triggerIdeScannerFlush(workspaceRoots);
+            event.sender.send('from-backend', {
+              command: 'moveComplete',
+              filename: moveRes.filename
+            });
+          }
+          const data = collectAllData(workspaceRoots);
+          event.sender.send('from-backend', data);
+        } else {
+          // Calculate destinations and open universal move modal
+          const targetRes = fsUtils.getMoveDestinations(message, workspaceRoots, activeLanguage);
+          if (!targetRes.success && targetRes.isProtected) {
+            event.sender.send('from-backend', {
+              command: 'error',
+              message: targetRes.message
+            });
+            return;
+          }
+          event.sender.send('from-backend', {
+            command: 'moveTargetsResponse',
+            data: targetRes
+          });
+        }
+        break;
+      }
+
+      case 'chooseCustomMoveFolder': {
+        try {
+          const result = await dialog.showOpenDialog(mainWindow, {
+            title: activeLanguage === 'ru' ? 'Выберите папку назначения' : 'Select Destination Folder',
+            properties: ['openDirectory', 'createDirectory']
+          });
+          if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+            event.sender.send('from-backend', {
+              command: 'customMoveFolderChosen',
+              folderPath: result.filePaths[0]
+            });
+          }
+        } catch (e) {
+          logDebug(`Error opening move folder dialog: ${e.message}`);
+        }
+        break;
+      }
+
+      case 'executeMove':
+      case 'moveItem': {
+        if (message.targetDir && message.physicalPath) {
+          const moveRes = await actions.moveItem(message.physicalPath, message.targetDir, {
+            lang: activeLanguage,
+            overwrite: !!message.overwrite,
+            category: message.category,
+            itemId: message.itemId,
+            enableInWorkspaceRoot: message.enableInWorkspaceRoot
+          });
+          if (!moveRes.success) {
+            if (moveRes.conflict) {
+              event.sender.send('from-backend', {
+                command: 'moveConflict',
+                conflict: true,
+                message: moveRes.message,
+                filename: moveRes.filename,
+                targetPath: moveRes.targetPath
+              });
+              return;
+            }
+            event.sender.send('from-backend', {
+              command: 'error',
+              message: moveRes.message || 'Failed to move resource'
+            });
+          } else {
+            await fsUtils.triggerIdeScannerFlush(workspaceRoots);
+            event.sender.send('from-backend', {
+              command: 'moveComplete',
+              filename: moveRes.filename
+            });
           }
         }
         const data = collectAllData(workspaceRoots);

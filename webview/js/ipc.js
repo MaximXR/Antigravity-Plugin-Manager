@@ -114,6 +114,30 @@ function handleIncomingMessage(message) {
       renderLiveContextModal();
       break;
 
+    case 'moveTargetsResponse':
+      if (typeof openMoveModal === 'function') {
+        openMoveModal(message);
+      }
+      break;
+
+    case 'customMoveFolderChosen':
+      if (typeof onCustomMoveFolderChosen === 'function') {
+        onCustomMoveFolderChosen(message.folderPath);
+      }
+      break;
+
+    case 'moveConflict':
+      if (typeof showMoveConflict === 'function') {
+        showMoveConflict(message.message);
+      }
+      break;
+
+    case 'moveComplete':
+      if (typeof closeMoveModal === 'function') {
+        closeMoveModal();
+      }
+      break;
+
     case 'error':
       document.body.classList.remove('loading');
       document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.remove('rotating'));

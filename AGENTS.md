@@ -25,6 +25,18 @@
 5. **Хуки** (Hooks) — жизненный цикл команд (`hooks.json`).
 6. **MCP Серверы** (MCP) — конфигурации серверов Model Context Protocol (`mcp_config.json`).
 
+### Трехслойная архитектура перемещения ресурсов (3-Tier Clean Move Architecture)
+Для обеспечения 100% переносимости операций перемещения между расширением IDE и автономным десктопным приложением реализовано строгое разделение обязанностей:
+1. **Сервисный слой ядра ([/services/fsUtils.js](/services/fsUtils.js), [/services/actions.js](/services/actions.js))**:
+   - `fsUtils.getMoveDestinations(moveMsg, workspaceRoots, lang)` — универсальный резолвер доступных мест назначения (Global `~/.gemini/config/`, подключенные репозитории `plugins.json`/`skills.json`, рабочие проекты `.agents/...`, вложенные каталоги плагинов `plugins/<id>/...`) для всех 6 категорий ресурсов (`plugin`, `skill`, `workflow`, `rule`, `mcp`, `hook`). Исключает текущее местоположение и системные защищенные компоненты.
+   - `actions.moveItem(physicalPath, targetDir, options)` — безопасное физическое перемещение с проверкой коллизий (`conflict: true`), поддержкой перезаписи (`overwrite: true`), удалением старых правил `exclude` и авто-маршрутизацией для секций MCP (`moveMcpServer`) и хуков (`moveHook`).
+2. **Слой хостов ([/desktop/main.js](/desktop/main.js), [/extension.js](/extension.js))**:
+   - Тонкие платформенные адаптеры. Принимают IPC-команды `requestMove` / `requestMoveTargets`, делегируют сбор целей в `fsUtils.getMoveDestinations` и возвращают событие `moveTargetsResponse`.
+   - Вызывают нативные диалоги выбора папок ОС (`dialog.showOpenDialog` в Electron vs `vscode.window.showOpenDialog` в VS Code) по команде `chooseCustomMoveFolder`.
+   - Исполняют перемещение по `executeMove` через `actions.moveItem`, отправляют статусы `moveConflict` / `moveComplete` и триггерят сброс кэша сканеров `triggerIdeScannerFlush`.
+3. **Слой интерфейса ([/webview/](/webview/))**:
+   - Платформо-независимое модальное окно `#move-modal` ([/webview/js/modals.js](/webview/js/modals.js)). Отображает текущий путь, радио-список стандартных мест назначения, поле произвольной папки с кнопкой обзора и блок подтверждения перезаписи при коллизиях.
+
 ---
 
 ## 2. Карта файлов и каталогов
@@ -82,7 +94,7 @@
 │   ├── start.bat              # Запуск десктопа в 1 клик
 │   ├── services/
 │   │   └── projects.js        # Сканер проектов Antigravity 2.0 и файловый вотчер
-│   └── test/                  # Инфраструктура автотестов
+│   └── test/                  # Инфраструктура автотестов (move_architecture.test.js, run_tests.js)
 │
 ├── dist/                      # Собранные пакеты: .vsix, .zip (для GitHub Release), Portable .exe и win-unpacked/
 ├── docs/                      # Инженерная документация и база знаний
@@ -459,33 +471,37 @@
 | 14 | `deleteItem` | Webview ➔ Backend | `category`, `id`, `name`, `physicalPath` | Удаление компонента с диска (с защитой встроенных и системных файлов) |
 | 15 | `deleteMcpServer` | Webview ➔ Backend | `serverName`, `physicalPath` | Удаление секции MCP сервера из `mcp_config.json` |
 | 16 | `deleteHook` | Webview ➔ Backend | `hookName`, `physicalPath` | Удаление секции хука из `hooks.json` |
-| 17 | `moveItem` | Webview ➔ Backend | `id`, `category`, `pluginId`, `isEnabled`, `isLocal`, `physicalPath` | Вызов меню и физический перенос ресурса между хранилищами (`safeMoveDir`) |
-| 18 | `moveMcpServer` | Webview ➔ Backend | `serverName`, `physicalPath` | Перенос конфигурации MCP сервера между скоупами |
-| 19 | `moveHook` | Webview ➔ Backend | `hookName`, `physicalPath` | Перенос конфигурации хука между скоупами |
-| 20 | `editMetadata` | Webview ➔ Backend | `category`, `id`, `field`, `value` | Инлайн-редактирование `displayName` или `description` в манифесте |
-| 21 | `resolveConflict` | Webview ➔ Backend | `id`, `category`, `resolution`, `activePath`, `storagePath`, `isDir` | Разрешение коллизий файлов между active и storage (`keepActive`, `keepStorage`, `merge`) |
-| 22 | `openFileInEditor` | Webview ➔ Backend | `category`, `filePath`, `serverName` | Открытие файла в редакторе (в IDE — в соседней вкладке, в Desktop — в редакторе по умолчанию ОС) |
-| 23 | `openFile` | Webview ➔ Backend | `physicalPath` / `filePath` / `file` | Алиас открытия произвольного файла в редакторе |
-| 24 | `openFolder` | Webview ➔ Backend | `path` | Открытие указанного каталога в Проводнике Windows |
-| 25 | `openItemFolder` | Webview ➔ Backend | `category`, `id`, `isEnabled`, `isLocal`, `physicalPath` | Открытие папки конкретного элемента в Проводнике |
-| 26 | `openConfigJson` | Webview ➔ Backend | — | Открытие главного конфигурационного файла `~/.gemini/config/config.json` |
-| 27 | `openPluginsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `plugins.json` (глобального или проектного) |
-| 28 | `openSkillsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `skills.json` (глобального или проектного) |
-| 29 | `openAgentsFolder` | Webview ➔ Backend | `workspaceRoot` | Открытие папки `.agents/` текущего проекта в Проводнике |
-| 30 | `openActive` | Webview ➔ Backend | — | Открытие стандартной папки плагинов `~/.gemini/config/plugins/` |
-| 31 | `openActiveSkills` | Webview ➔ Backend | — | Открытие стандартной папки навыков `~/.gemini/config/skills/` |
-| 32 | `openStorage` | Webview ➔ Backend | — | Открытие каталога хранилища |
-| 33 | `selectStorage` | Webview ➔ Backend | — | Выбор пользовательской папки хранилища через диалог ОС |
-| 34 | `connectFolder` | Webview ➔ Backend | `type` (`plugins` / `skills`), `scope` (`global` / `workspace`), `workspaceRoot` | Подключение внешнего каталога с плагинами или навыками в манифест |
-| 35 | `disconnectFolder` | Webview ➔ Backend | `folderPath`, `type`, `scope`, `workspaceRoot` | Безопасное отключение внешней папки из манифеста |
-| 36 | `changeLanguage` | Webview ➔ Backend | `language` (`ru` / `en`) | Смена языка интерфейса и сохранение настройки |
-| 37 | `switchAntigravityProject` | Webview ➔ Desktop | `projectId` | Desktop: выбор активного проекта Antigravity 2.0 или пользовательской папки |
-| 38 | `refreshAntigravityProjects` | Webview ➔ Desktop | — | Desktop: повторное сканирование реестра проектов Antigravity 2.0 |
-| 39 | `chooseCustomWorkspaceFolder` | Webview ➔ Desktop | — | Desktop: диалог открытия папки для добавления в пользовательские проекты |
-| 40 | `switchWorkspaceFolder` | Webview ➔ Extension | `index` | Extension: переключение активной папки в Multi-Root окне VS Code |
-| 41 | `setMultiRootTargetMode` | Webview ➔ Extension | `mode` (`active` / `all` / `specific`) | Extension: режим целевой папки при нескольких корнях в окне |
-| 42 | `setMultiRootSpecificFolder` | Webview ➔ Extension | `folderPath` | Extension: выбор конкретной папки для таргетинга операций |
-| 43 | `updateData` | Backend ➔ Webview | `{ plugins, rules, skills, workflows, mcp, hooks, workspaceRoots... }` | Передача полного снимка данных для рендеринга интерфейса |
-| 44 | `updateStatus` | Backend ➔ Webview | `{ text, isError }` | Передача текстового статуса в нижнюю строку состояния Webview |
-| 45 | `liveContextData` / `updatesChecked` / `updateProgress` / `updateComplete` / `updateFailed` | Backend ➔ Webview | `{ data, updates, progress, error... }` | Асинхронные события движка обновлений и инспектора промпта |
+| 17 | `requestMove` / `requestMoveTargets` | Webview ➔ Backend | `itemId`, `category`, `physicalPath`... | Запрос доступных целей перемещения через `fsUtils.getMoveDestinations` |
+| 18 | `moveTargetsResponse` | Backend ➔ Webview | `{ destinations, sourcePath, category, itemId... }` | Ответ со списком целей для отрисовки модального окна `#move-modal` |
+| 19 | `chooseCustomMoveFolder` | Webview ➔ Backend | — | Открытие нативного системного диалога выбора папки (Electron/VS Code) |
+| 20 | `customMoveFolderChosen` | Backend ➔ Webview | `{ folderPath }` | Передача выбранной пользовательской папки в поле ввода `#move-modal` |
+| 21 | `executeMove` / `moveItem` | Webview ➔ Backend | `physicalPath`, `targetDir`, `overwrite`, `category`, `itemId` | Безопасное перемещение через `actions.moveItem` с обработкой коллизий |
+| 22 | `moveConflict` | Backend ➔ Webview | `{ message, filename, targetPath }` | Уведомление о коллизии имён для активации чекбокса перезаписи в UI |
+| 23 | `moveComplete` | Backend ➔ Webview | `{ filename }` | Уведомление об успешном завершении перемещения и закрытие модалки |
+| 24 | `editMetadata` | Webview ➔ Backend | `category`, `id`, `field`, `value` | Инлайн-редактирование `displayName` или `description` в манифесте |
+| 25 | `resolveConflict` | Webview ➔ Backend | `id`, `category`, `resolution`, `activePath`, `storagePath`, `isDir` | Разрешение коллизий файлов между active и storage (`keepActive`, `keepStorage`, `merge`) |
+| 26 | `openFileInEditor` | Webview ➔ Backend | `category`, `filePath`, `serverName` | Открытие файла в редакторе (в IDE — в соседней вкладке, в Desktop — в редакторе по умолчанию ОС) |
+| 27 | `openFile` | Webview ➔ Backend | `physicalPath` / `filePath` / `file` | Алиас открытия произвольного файла в редакторе |
+| 28 | `openFolder` | Webview ➔ Backend | `path` | Открытие указанного каталога в Проводнике Windows |
+| 29 | `openItemFolder` | Webview ➔ Backend | `category`, `id`, `isEnabled`, `isLocal`, `physicalPath` | Открытие папки конкретного элемента в Проводнике |
+| 30 | `openConfigJson` | Webview ➔ Backend | — | Открытие главного конфигурационного файла `~/.gemini/config/config.json` |
+| 31 | `openPluginsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `plugins.json` (глобального или проектного) |
+| 32 | `openSkillsJson` | Webview ➔ Backend | `workspaceRoot` (optional) | Открытие `skills.json` (глобального или проектного) |
+| 33 | `openAgentsFolder` | Webview ➔ Backend | `workspaceRoot` | Открытие папки `.agents/` текущего проекта в Проводнике |
+| 34 | `openActive` | Webview ➔ Backend | — | Открытие стандартной папки плагинов `~/.gemini/config/plugins/` |
+| 35 | `openActiveSkills` | Webview ➔ Backend | — | Открытие стандартной папки навыков `~/.gemini/config/skills/` |
+| 36 | `openStorage` | Webview ➔ Backend | — | Открытие каталога хранилища |
+| 37 | `selectStorage` | Webview ➔ Backend | — | Выбор пользовательской папки хранилища через диалог ОС |
+| 38 | `connectFolder` | Webview ➔ Backend | `type` (`plugins` / `skills`), `scope` (`global` / `workspace`), `workspaceRoot` | Подключение внешнего каталога с плагинами или навыками в манифест |
+| 39 | `disconnectFolder` | Webview ➔ Backend | `folderPath`, `type`, `scope`, `workspaceRoot` | Безопасное отключение внешней папки из манифеста |
+| 40 | `changeLanguage` | Webview ➔ Backend | `language` (`ru` / `en`) | Смена языка интерфейса и сохранение настройки |
+| 41 | `switchAntigravityProject` | Webview ➔ Desktop | `projectId` | Desktop: выбор активного проекта Antigravity 2.0 или пользовательской папки |
+| 42 | `refreshAntigravityProjects` | Webview ➔ Desktop | — | Desktop: повторное сканирование реестра проектов Antigravity 2.0 |
+| 43 | `chooseCustomWorkspaceFolder` | Webview ➔ Desktop | — | Desktop: диалог открытия папки для добавления в пользовательские проекты |
+| 44 | `switchWorkspaceFolder` | Webview ➔ Extension | `index` | Extension: переключение активной папки в Multi-Root окне VS Code |
+| 45 | `setMultiRootTargetMode` | Webview ➔ Extension | `mode` (`active` / `all` / `specific`) | Extension: режим целевой папки при нескольких корнях в окне |
+| 46 | `setMultiRootSpecificFolder` | Webview ➔ Extension | `folderPath` | Extension: выбор конкретной папки для таргетинга операций |
+| 47 | `updateData` | Backend ➔ Webview | `{ plugins, rules, skills, workflows, mcp, hooks, workspaceRoots... }` | Передача полного снимка данных для рендеринга интерфейса |
+| 48 | `updateStatus` | Backend ➔ Webview | `{ text, isError }` | Передача текстового статуса в нижнюю строку состояния Webview |
+| 49 | `liveContextData` / `updatesChecked` / `updateProgress` / `updateComplete` / `updateFailed` | Backend ➔ Webview | `{ data, updates, progress, error... }` | Асинхронные события движка обновлений и инспектора промпта |
 

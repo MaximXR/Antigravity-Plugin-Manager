@@ -196,22 +196,12 @@ function deleteMcpServer(serverName, physicalPath) {
 window.deleteMcpServer = deleteMcpServer;
 
 function moveMcpServer(serverName, physicalPath) {
-  setSyncingState(2100);
-  vscode.postMessage({
-    command: 'moveMcp',
-    serverName: serverName,
-    physicalPath: physicalPath
-  });
+  moveItem(serverName, 'mcp', null, false, false, physicalPath);
 }
 window.moveMcpServer = moveMcpServer;
 
 function moveHook(hookName, physicalPath) {
-  setSyncingState(2100);
-  vscode.postMessage({
-    command: 'moveHook',
-    hookName: hookName,
-    physicalPath: physicalPath
-  });
+  moveItem(hookName, 'hook', null, false, false, physicalPath);
 }
 window.moveHook = moveHook;
 

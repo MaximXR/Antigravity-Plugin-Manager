@@ -1460,6 +1460,263 @@ function getWebviewScript(webviewDir) {
   return '';
 }
 
+// Calculate available move destinations for a resource (Clean 3-Tier Move Architecture)
+function getMoveDestinations(moveMsg, workspaceRoots = [], lang = 'en') {
+  if (!moveMsg) return { success: false, destinations: [] };
+  const { itemId, category, sourcePluginId, isLocal, physicalPath } = moveMsg;
+
+  const bPath = getBuiltinPath().toLowerCase();
+  const isBuiltin = (itemId && (itemId.startsWith('builtin-') || itemId.includes('builtin'))) ||
+    (physicalPath && physicalPath.toLowerCase().startsWith(bPath));
+
+  if (isBuiltin) {
+    return {
+      success: false,
+      isProtected: true,
+      message: lang === 'ru' ? 'Встроенные системные компоненты нельзя перемещать.' : 'Built-in system components cannot be moved.',
+      destinations: []
+    };
+  }
+
+  let sourcePath = physicalPath || '';
+  let currentParentDir = '';
+  if (sourcePath) {
+    currentParentDir = path.normalize(path.dirname(sourcePath)).toLowerCase();
+  }
+
+  const destinations = [];
+  const activePluginsPath = getActivePluginsPath();
+  const activeSkillsPath = getActiveSkillsPath();
+  const activeWorkflowsPath = getActiveWorkflowsPath();
+
+  // 1. Standard Global (~/.gemini/config/...)
+  let standardGlobalDir = '';
+  if (category === 'plugin') standardGlobalDir = activePluginsPath;
+  else if (category === 'skill') standardGlobalDir = activeSkillsPath;
+  else if (category === 'workflow') standardGlobalDir = activeWorkflowsPath;
+
+  const standardGlobalNorm = standardGlobalDir ? path.normalize(standardGlobalDir).toLowerCase() : '';
+  const isAlreadyInStandardGlobal = standardGlobalNorm && currentParentDir === standardGlobalNorm;
+
+  if (category !== 'rule' && !isAlreadyInStandardGlobal && standardGlobalDir) {
+    destinations.push({
+      id: 'global',
+      type: 'global',
+      label: lang === 'ru' ? 'Стандартный глобальный (~/.gemini)' : 'Standard Global (~/.gemini)',
+      description: standardGlobalDir,
+      icon: '🌐',
+      targetParent: standardGlobalDir
+    });
+  }
+
+  // Lazy-require scanners to avoid circular require at load time
+  let scanners = null;
+  try {
+    scanners = require('./scanners');
+  } catch (_) {}
+
+  const validRoots = Array.isArray(workspaceRoots) ? workspaceRoots.filter(Boolean) : [];
+
+  // 1b. Dedicated handling for MCP servers (moves between mcp_config.json files)
+  if (category === 'mcp') {
+    const globalMcp = path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
+    if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(globalMcp).toLowerCase()) {
+      destinations.push({
+        id: 'global-mcp',
+        type: 'global',
+        label: lang === 'ru' ? 'Глобальный (mcp_config.json)' : 'Global (mcp_config.json)',
+        description: globalMcp,
+        icon: '🌐',
+        targetParent: globalMcp
+      });
+    }
+    validRoots.forEach(wsRoot => {
+      const wsMcp = path.join(wsRoot, '.agents', 'mcp_config.json');
+      if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(wsMcp).toLowerCase()) {
+        destinations.push({
+          id: 'workspace:' + wsRoot,
+          type: 'workspace',
+          label: `${lang === 'ru' ? 'Рабочий проект' : 'Workspace'}: ${path.basename(wsRoot)}`,
+          description: wsMcp,
+          icon: '💼',
+          targetParent: wsMcp
+        });
+      }
+    });
+    if (scanners) {
+      try {
+        const globalPlugins = scanners.scanPlugins ? scanners.scanPlugins(activePluginsPath, validRoots) : [];
+        const localPlugins = scanners.scanLocalPlugins ? scanners.scanLocalPlugins(validRoots) : [];
+        [...globalPlugins, ...localPlugins].forEach(p => {
+          if (p.physicalPath) {
+            const pMcp = path.join(p.physicalPath, 'mcp_config.json');
+            if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(pMcp).toLowerCase()) {
+              destinations.push({
+                id: 'plugin:' + (p.id || p.name),
+                type: 'plugin',
+                label: `${lang === 'ru' ? 'В плагин' : 'Into plugin'}: ${p.displayName || p.name}`,
+                description: pMcp,
+                icon: '🔌',
+                targetParent: pMcp
+              });
+            }
+          }
+        });
+      } catch (_) {}
+    }
+    return {
+      success: true,
+      itemId: itemId || '',
+      sourcePath: sourcePath,
+      currentParentDir: currentParentDir,
+      category: category,
+      destinations: destinations,
+      enableInWorkspaceRoot: moveMsg.enableInWorkspaceRoot || null
+    };
+  }
+
+  // 1c. Dedicated handling for Hooks (moves between hooks.json files)
+  if (category === 'hook') {
+    const globalHooks = path.join(os.homedir(), '.gemini', 'config', 'hooks.json');
+    if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(globalHooks).toLowerCase()) {
+      destinations.push({
+        id: 'global-hooks',
+        type: 'global',
+        label: lang === 'ru' ? 'Глобальный (hooks.json)' : 'Global (hooks.json)',
+        description: globalHooks,
+        icon: '🌐',
+        targetParent: globalHooks
+      });
+    }
+    validRoots.forEach(wsRoot => {
+      const wsHooks = path.join(wsRoot, '.agents', 'hooks.json');
+      if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(wsHooks).toLowerCase()) {
+        destinations.push({
+          id: 'workspace:' + wsRoot,
+          type: 'workspace',
+          label: `${lang === 'ru' ? 'Рабочий проект' : 'Workspace'}: ${path.basename(wsRoot)}`,
+          description: wsHooks,
+          icon: '💼',
+          targetParent: wsHooks
+        });
+      }
+    });
+    if (scanners) {
+      try {
+        const globalPlugins = scanners.scanPlugins ? scanners.scanPlugins(activePluginsPath, validRoots) : [];
+        const localPlugins = scanners.scanLocalPlugins ? scanners.scanLocalPlugins(validRoots) : [];
+        [...globalPlugins, ...localPlugins].forEach(p => {
+          if (p.physicalPath) {
+            const pHooks = path.join(p.physicalPath, 'hooks.json');
+            if (!sourcePath || path.resolve(sourcePath).toLowerCase() !== path.resolve(pHooks).toLowerCase()) {
+              destinations.push({
+                id: 'plugin:' + (p.id || p.name),
+                type: 'plugin',
+                label: `${lang === 'ru' ? 'В плагин' : 'Into plugin'}: ${p.displayName || p.name}`,
+                description: pHooks,
+                icon: '🔌',
+                targetParent: pHooks
+              });
+            }
+          }
+        });
+      } catch (_) {}
+    }
+    return {
+      success: true,
+      itemId: itemId || '',
+      sourcePath: sourcePath,
+      currentParentDir: currentParentDir,
+      category: category,
+      destinations: destinations,
+      enableInWorkspaceRoot: moveMsg.enableInWorkspaceRoot || null
+    };
+  }
+
+  // 2. Connected custom folders (from plugins.json / skills.json)
+  if (scanners && typeof scanners.getConnectedFolders === 'function') {
+    const connectedFolders = scanners.getConnectedFolders(workspaceRoots);
+    const relevantConnected = connectedFolders.filter(cf => {
+      if (category === 'plugin') return cf.type === 'plugin' || cf.category === 'plugins';
+      if (category === 'skill') return cf.type === 'skill' || cf.category === 'skills';
+      return false;
+    });
+
+    relevantConnected.forEach(cf => {
+      const cfNorm = path.normalize(cf.path).toLowerCase();
+      if (currentParentDir !== cfNorm) {
+        const scopeLabel = cf.scope === 'global' ? 'Global' : (cf.workspaceName || 'Workspace');
+        destinations.push({
+          id: 'connected:' + cf.path,
+          type: 'connected',
+          label: `${lang === 'ru' ? 'Подключенная папка' : 'Connected folder'}: ${path.basename(cf.path)}`,
+          description: `${cf.scope === 'global' ? '🌐' : '📁'} ${scopeLabel} (${cf.path})`,
+          icon: '📚',
+          targetParent: cf.path
+        });
+      }
+    });
+  }
+
+  // 3. Workspace projects (from workspaceRoots)
+  validRoots.forEach(wsRoot => {
+    let wsTargetParent = '';
+    if (category === 'plugin') wsTargetParent = path.join(wsRoot, '.agents', 'plugins');
+    else if (category === 'skill') wsTargetParent = path.join(wsRoot, '.agents', 'skills');
+    else if (category === 'workflow') wsTargetParent = path.join(wsRoot, '.agents', 'workflows');
+    else if (category === 'rule') wsTargetParent = path.join(wsRoot, '.agents', 'rules');
+
+    if (wsTargetParent && currentParentDir !== path.normalize(wsTargetParent).toLowerCase()) {
+      const wsName = path.basename(wsRoot);
+      destinations.push({
+        id: 'workspace:' + wsRoot,
+        type: 'workspace',
+        label: `${lang === 'ru' ? 'Рабочий проект' : 'Workspace Project'}: ${wsName}`,
+        description: wsTargetParent,
+        icon: '💼',
+        targetParent: wsTargetParent,
+        workspaceRoot: wsRoot
+      });
+    }
+  });
+
+  // 4. Inside plugins (for skills and rules)
+  if (scanners && (category === 'skill' || category === 'rule')) {
+    try {
+      const globalPlugins = scanners.scanPlugins ? scanners.scanPlugins(activePluginsPath, validRoots) : [];
+      const localPlugins = scanners.scanLocalPlugins ? scanners.scanLocalPlugins(validRoots) : [];
+      const allPlugins = [...globalPlugins, ...localPlugins];
+      const otherPlugins = allPlugins.filter(p => p.id !== sourcePluginId && p.name !== sourcePluginId);
+
+      otherPlugins.forEach(p => {
+        const pFolder = p.physicalPath || path.join(activePluginsPath, p.id);
+        const pTargetParent = path.join(pFolder, category === 'skill' ? 'skills' : 'rules');
+        if (currentParentDir !== path.normalize(pTargetParent).toLowerCase()) {
+          destinations.push({
+            id: 'plugin:' + (p.id || p.name),
+            type: 'plugin',
+            label: `${lang === 'ru' ? 'В плагин' : 'Into plugin'}: ${p.displayName || p.name}`,
+            description: `ID: ${p.id} (${pTargetParent})`,
+            icon: '🔌',
+            targetParent: pTargetParent,
+            pluginId: p.id
+          });
+        }
+      });
+    } catch (_) {}
+  }
+
+  return {
+    success: true,
+    itemId: itemId || (sourcePath ? path.basename(sourcePath) : ''),
+    sourcePath: sourcePath,
+    currentParentDir: currentParentDir,
+    category: category,
+    destinations: destinations,
+    enableInWorkspaceRoot: moveMsg.enableInWorkspaceRoot || null
+  };
+}
+
 module.exports = {
   getWebviewScript,
   logDebug,
@@ -1520,6 +1777,7 @@ module.exports = {
   cleanupDefaultPluginsFolderInGlobalConfig,
   migrateFromLegacyStorage,
   getWorkspaceCustomizationDirs,
-  getMarkdownFilesRecursive
+  getMarkdownFilesRecursive,
+  getMoveDestinations
 };
 

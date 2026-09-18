@@ -30,7 +30,8 @@ const {
   removeExcludeFromJsonConfig,
   setPluginManifestDisabled,
   removeAntigravityPluginFromConfig,
-  migrateFromLegacyStorage
+  migrateFromLegacyStorage,
+  getMoveDestinations
 } = require('./services/fsUtils');
 const {
   scanConflicts,
@@ -66,7 +67,8 @@ const {
   createItem,
   deleteItem,
   resolveConflict,
-  migrateStorage
+  migrateStorage,
+  moveItem
 } = require('./services/actions');
 const {
   parsePluginRepo,
@@ -608,217 +610,20 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
 
     const executeRequestMove = async (moveMsg) => {
       try {
-        const { itemId, category, sourcePluginId, isEnabled } = moveMsg;
-        const bPath = getBuiltinPath().toLowerCase();
-        if (itemId && (itemId.startsWith('builtin-') || itemId.includes('builtin')) || 
-            (moveMsg.physicalPath && moveMsg.physicalPath.toLowerCase().startsWith(bPath))) {
-          vscode.window.showWarningMessage(getTranslation('cannotModifyBuiltin', lang));
+        const workspaceRoots = getWorkspaceRoots();
+        const targetRes = getMoveDestinations(moveMsg, workspaceRoots, lang);
+        if (!targetRes.success && targetRes.isProtected) {
+          vscode.window.showWarningMessage(targetRes.message);
+          webview.postMessage({
+            command: 'error',
+            message: targetRes.message
+          });
           return;
         }
-
-        const workspaceRoots = getWorkspaceRoots();
-        const globalPlugins = scanPlugins(activePluginsPath, workspaceRoots);
-        const localPlugins = scanLocalPlugins(workspaceRoots);
-        const allPlugins = [...globalPlugins, ...localPlugins];
-        const otherPlugins = allPlugins.filter(p => p.id !== sourcePluginId && p.name !== sourcePluginId);
-        const quickPickItems = [];
-        
-        let currentParentDir = '';
-        if (moveMsg.physicalPath) {
-          currentParentDir = path.normalize(path.dirname(moveMsg.physicalPath)).toLowerCase();
-        } else if (sourcePluginId) {
-          const pluginFolder = path.join(activePluginsPath, sourcePluginId);
-          currentParentDir = path.normalize(path.join(pluginFolder, category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'))).toLowerCase();
-        } else if (moveMsg.isLocal) {
-          if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]) {
-            const ws0 = vscode.workspace.workspaceFolders[0].uri.fsPath;
-            currentParentDir = path.normalize(category === 'plugin' 
-              ? path.join(ws0, '.agents', 'plugins') 
-              : path.join(ws0, '.agents', category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'))
-            ).toLowerCase();
-          }
-        } else {
-          if (category === 'plugin') currentParentDir = path.normalize(activePluginsPath).toLowerCase();
-          else if (category === 'skill') currentParentDir = path.normalize(activeSkillsPath).toLowerCase();
-          else if (category === 'workflow') currentParentDir = path.normalize(activeWorkflowsPath).toLowerCase();
-        }
-
-        // 1. Standard Global (~/.gemini/config/...)
-        let standardGlobalDir = '';
-        if (category === 'plugin') standardGlobalDir = activePluginsPath;
-        else if (category === 'skill') standardGlobalDir = activeSkillsPath;
-        else if (category === 'workflow') standardGlobalDir = activeWorkflowsPath;
-
-        const standardGlobalNorm = standardGlobalDir ? path.normalize(standardGlobalDir).toLowerCase() : '';
-        const isAlreadyInStandardGlobal = standardGlobalNorm && currentParentDir === standardGlobalNorm;
-
-        if (category !== 'rule' && !isAlreadyInStandardGlobal && standardGlobalDir) {
-          quickPickItems.push({
-            label: lang === 'ru' ? '$(globe) Стандартный глобальный (~/.gemini)' : '$(globe) Standard Global (~/.gemini)',
-            description: standardGlobalDir,
-            id: 'global',
-            type: 'global'
-          });
-        }
-
-        // 2. Connected custom folders (from plugins.json / skills.json)
-        const connectedFolders = getConnectedFolders(workspaceRoots);
-        const relevantConnected = connectedFolders.filter(cf => {
-          if (category === 'plugin') return cf.type === 'plugin' || cf.category === 'plugins';
-          if (category === 'skill') return cf.type === 'skill' || cf.category === 'skills';
-          return false;
+        webview.postMessage({
+          command: 'moveTargetsResponse',
+          data: targetRes
         });
-        relevantConnected.forEach(cf => {
-          const cfNorm = path.normalize(cf.path).toLowerCase();
-          if (currentParentDir !== cfNorm) {
-            const scopeLabel = cf.scope === 'global' ? 'Global' : (cf.workspaceName || 'Workspace');
-            quickPickItems.push({
-              label: `$(folder-library) ${lang === 'ru' ? 'Подключенная папка' : 'Connected folder'}: ${path.basename(cf.path)}`,
-              description: `${cf.scope === 'global' ? '🌐' : '📁'} ${scopeLabel} (${cf.path})`,
-              id: cf.path,
-              type: 'connected',
-              folderPath: cf.path
-            });
-          }
-        });
-        
-        // 3. Inside plugins (for skills and rules)
-        if (category !== 'workflow' && category !== 'plugin') {
-          otherPlugins.forEach(p => {
-            quickPickItems.push({
-              label: `$(extensions) ${lang === 'ru' ? 'В плагин' : 'Into plugin'}: ${p.displayName}`,
-              description: `ID: ${p.id}`,
-              id: p.id,
-              type: 'plugin'
-            });
-          });
-        }
-
-        // 4. Workspace projects
-        if (vscode.workspace.workspaceFolders) {
-          vscode.workspace.workspaceFolders.forEach(folder => {
-            const wsTargetParent = path.normalize(category === 'plugin' 
-              ? path.join(folder.uri.fsPath, '.agents', 'plugins') 
-              : path.join(folder.uri.fsPath, '.agents', category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'))
-            ).toLowerCase();
-
-            if (currentParentDir !== wsTargetParent) {
-              quickPickItems.push({
-                label: `$(folder) ${lang === 'ru' ? 'Рабочая область' : 'Workspace'}: ${folder.name}`,
-                description: wsTargetParent,
-                id: folder.uri.fsPath,
-                type: 'workspace'
-              });
-            }
-          });
-        }
-        
-        const selected = await vscode.window.showQuickPick(quickPickItems, {
-          placeHolder: lang === 'ru' ? `Выберите место назначения для элемента "${itemId}"` : `Select destination for "${itemId}"`
-        });
-        
-        if (selected !== undefined) {
-          const targetType = selected.type;
-          const targetId = selected.id;
-          let sourcePath = '';
-          let targetParent = '';
-          
-          if (moveMsg.physicalPath && fs.existsSync(moveMsg.physicalPath)) {
-            sourcePath = moveMsg.physicalPath;
-          } else if (sourcePluginId) {
-            const pluginFolder = path.join(activePluginsPath, sourcePluginId);
-            sourcePath = path.join(pluginFolder, category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'), itemId);
-          } else if (moveMsg.isLocal && moveMsg.physicalPath) {
-            sourcePath = moveMsg.physicalPath;
-          } else {
-            if (category === 'skill') sourcePath = path.join(activeSkillsPath, itemId);
-            else if (category === 'workflow') sourcePath = path.join(activeWorkflowsPath, itemId);
-            else if (category === 'plugin') sourcePath = path.join(activePluginsPath, itemId);
-          }
-          
-          if (targetType === 'plugin') {
-            const targetPlugin = allPlugins.find(p => p.id === targetId || p.name === targetId);
-            const targetPluginFolder = targetPlugin && targetPlugin.physicalPath 
-              ? targetPlugin.physicalPath 
-              : path.join(activePluginsPath, targetId);
-            targetParent = path.join(targetPluginFolder, category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'));
-          } else if (targetType === 'global') {
-            if (category === 'skill') targetParent = activeSkillsPath;
-            else if (category === 'workflow') targetParent = activeWorkflowsPath;
-            else if (category === 'plugin') targetParent = activePluginsPath;
-          } else if (targetType === 'connected') {
-            targetParent = selected.folderPath;
-          } else if (targetType === 'workspace') {
-            if (category === 'plugin') targetParent = path.join(targetId, '.agents', 'plugins');
-            else targetParent = path.join(targetId, '.agents', category === 'skill' ? 'skills' : (category === 'workflow' ? 'workflows' : 'rules'));
-          }
-          
-          if (!sourcePath || !targetParent || !fs.existsSync(sourcePath)) {
-            throw new Error(getTranslation('invalidPaths', lang));
-          }
-          
-          if (!fs.existsSync(targetParent)) fs.mkdirSync(targetParent, { recursive: true });
-          
-          const filename = path.basename(sourcePath);
-          const targetPath = path.join(targetParent, filename);
-          
-          if (path.resolve(sourcePath).toLowerCase() === path.resolve(targetPath).toLowerCase()) {
-            vscode.window.showInformationMessage(getTranslation('alreadyInFolder', lang).replace('{itemId}', filename));
-            return;
-          }
-          
-          if (fs.existsSync(targetPath)) {
-            const yes = lang === 'ru' ? 'Да' : 'Yes';
-            const no = lang === 'ru' ? 'Нет' : 'No';
-            const overwriteChoice = await vscode.window.showWarningMessage(
-              getTranslation('overwritePrompt', lang).replace('{itemId}', filename), yes, no
-            );
-            if (overwriteChoice === yes) {
-              const stat = fs.statSync(targetPath);
-              if (stat.isDirectory()) fs.rmSync(targetPath, { recursive: true, force: true });
-              else fs.unlinkSync(targetPath);
-            } else return;
-          }
-          
-          safeMoveDir(sourcePath, targetPath);
-          if (category === 'skill') {
-            const globalSkillsJson = getGlobalSkillsJsonPath();
-            if (targetType === 'connected') {
-              const wasExcluded = isNameExcludedInJsonConfig(globalSkillsJson, filename, sourcePath);
-              if (wasExcluded) {
-                addExcludeToJsonConfig(globalSkillsJson, filename, targetPath);
-              } else {
-                removeExcludeFromJsonConfig(globalSkillsJson, filename);
-              }
-            } else if (targetType === 'workspace') {
-              removeExcludeFromJsonConfig(globalSkillsJson, filename);
-            }
-            if (moveMsg.enableInWorkspaceRoot) {
-              await toggleSkillProject(moveMsg.enableInWorkspaceRoot, targetPath, filename, 'enable', lang);
-            }
-          } else if (category === 'plugin') {
-            const globalPluginsJson = getGlobalPluginsJsonPath();
-            if (targetType === 'connected') {
-              setPluginManifestDisabled(targetPath, false);
-              removeAntigravityPluginFromConfig(filename);
-              const wasExcluded = isNameExcludedInJsonConfig(globalPluginsJson, filename, sourcePath);
-              if (wasExcluded) {
-                addExcludeToJsonConfig(globalPluginsJson, filename, targetPath);
-              } else {
-                removeExcludeFromJsonConfig(globalPluginsJson, filename);
-              }
-            } else if (targetType === 'workspace') {
-              setPluginManifestDisabled(targetPath, false);
-              removeAntigravityPluginFromConfig(filename);
-              removeExcludeFromJsonConfig(globalPluginsJson, filename);
-            }
-            if (moveMsg.enableInWorkspaceRoot) {
-              await togglePluginProject(moveMsg.enableInWorkspaceRoot, targetPath, filename, 'enable', lang);
-            }
-          }
-          await notifyAndUpdate();
-          vscode.window.showInformationMessage(getTranslation('moveSuccess', lang).replace('{itemId}', filename));
-        }
       } catch (e) {
         vscode.window.showErrorMessage(getTranslation('errorMove', lang).replace('{error}', e.message));
       }
@@ -1659,8 +1464,102 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         break;
 
       case 'requestMove':
-        await executeRequestMove(message);
+      case 'requestMoveTargets': {
+        if (message.targetDir && message.physicalPath) {
+          const moveRes = await moveItem(message.physicalPath, message.targetDir, {
+            lang,
+            overwrite: !!message.overwrite,
+            category: message.category,
+            itemId: message.itemId,
+            enableInWorkspaceRoot: message.enableInWorkspaceRoot
+          });
+          if (!moveRes.success) {
+            if (moveRes.conflict) {
+              webview.postMessage({
+                command: 'moveConflict',
+                conflict: true,
+                message: moveRes.message,
+                filename: moveRes.filename,
+                targetPath: moveRes.targetPath
+              });
+              return;
+            }
+            vscode.window.showErrorMessage(moveRes.message || 'Protected resource cannot be moved');
+            webview.postMessage({
+              command: 'error',
+              message: moveRes.message || 'Protected resource cannot be moved'
+            });
+          } else {
+            await notifyAndUpdate(true);
+            webview.postMessage({
+              command: 'moveComplete',
+              filename: moveRes.filename
+            });
+            vscode.window.showInformationMessage(getTranslation('moveSuccess', lang).replace('{itemId}', moveRes.filename));
+          }
+        } else {
+          await executeRequestMove(message);
+        }
         break;
+      }
+
+      case 'chooseCustomMoveFolder': {
+        try {
+          const uris = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: lang === 'ru' ? 'Выбрать папку назначения' : 'Select Destination Folder'
+          });
+          if (uris && uris.length > 0) {
+            webview.postMessage({
+              command: 'customMoveFolderChosen',
+              folderPath: uris[0].fsPath
+            });
+          }
+        } catch (e) {
+          logDebug(`Error opening move folder dialog: ${e.message}`);
+        }
+        break;
+      }
+
+      case 'executeMove':
+      case 'moveItem': {
+        if (message.targetDir && message.physicalPath) {
+          const moveRes = await moveItem(message.physicalPath, message.targetDir, {
+            lang,
+            overwrite: !!message.overwrite,
+            category: message.category,
+            itemId: message.itemId,
+            enableInWorkspaceRoot: message.enableInWorkspaceRoot
+          });
+          if (!moveRes.success) {
+            if (moveRes.conflict) {
+              webview.postMessage({
+                command: 'moveConflict',
+                conflict: true,
+                message: moveRes.message,
+                filename: moveRes.filename,
+                targetPath: moveRes.targetPath
+              });
+              return;
+            }
+            vscode.window.showErrorMessage(moveRes.message || 'Failed to move resource');
+            webview.postMessage({
+              command: 'error',
+              message: moveRes.message || 'Failed to move resource'
+            });
+          } else {
+            await notifyAndUpdate(true);
+            webview.postMessage({
+              command: 'moveComplete',
+              filename: moveRes.filename
+            });
+            vscode.window.showInformationMessage(getTranslation('moveSuccess', lang).replace('{itemId}', moveRes.filename));
+          }
+        }
+        break;
+      }
     }
   });
 }

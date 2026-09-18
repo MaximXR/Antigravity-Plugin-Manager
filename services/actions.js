@@ -694,22 +694,106 @@ async function deleteItem(category, itemId, displayName, physicalPath, lang, act
 }
 
 // Move item with protection checks for built-in skills and protected files
-async function moveItem(physicalPath, targetDir, lang = 'en') {
+async function moveItem(physicalPath, targetDir, options = {}) {
+  const lang = typeof options === 'string' ? options : (options && options.lang ? options.lang : 'en');
+  const overwrite = typeof options === 'object' && options ? !!options.overwrite : false;
+  const enableInWorkspaceRoot = typeof options === 'object' && options ? options.enableInWorkspaceRoot : null;
+  const category = typeof options === 'object' && options ? options.category : null;
+
   if (!physicalPath || !targetDir) {
     return { success: false, message: 'Invalid paths' };
   }
   if (isProtectedResource(physicalPath)) {
-    return { success: false, message: 'Protected resource cannot be moved' };
+    return { success: false, message: getTranslation('cannotModifyBuiltin', lang) };
   }
   if (!fs.existsSync(physicalPath)) {
     return { success: false, message: `Source file does not exist: ${physicalPath}` };
   }
+
+  if (category === 'mcp') {
+    const serverName = (options && options.itemId) || path.basename(physicalPath);
+    const targetFile = targetDir.endsWith('.json') ? targetDir : path.join(targetDir, 'mcp_config.json');
+    try {
+      await moveMcpServer(serverName, physicalPath, targetFile, lang);
+      return { success: true, targetPath: targetFile, filename: serverName };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  if (category === 'hook') {
+    const hookName = (options && options.itemId) || path.basename(physicalPath);
+    const targetFile = targetDir.endsWith('.json') ? targetDir : path.join(targetDir, 'hooks.json');
+    try {
+      await moveHook(hookName, physicalPath, targetFile, lang);
+      return { success: true, targetPath: targetFile, filename: hookName };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  const filename = path.basename(physicalPath);
+  const targetFile = path.join(targetDir, filename);
+
+  if (path.resolve(physicalPath).toLowerCase() === path.resolve(targetFile).toLowerCase()) {
+    return {
+      success: false,
+      alreadyInFolder: true,
+      message: getTranslation('alreadyInFolder', lang).replace('{itemId}', filename)
+    };
+  }
+
+  if (fs.existsSync(targetFile)) {
+    if (!overwrite) {
+      return {
+        success: false,
+        conflict: true,
+        filename: filename,
+        targetPath: targetFile,
+        message: getTranslation('overwritePrompt', lang).replace('{itemId}', filename)
+      };
+    }
+    // Overwrite confirmed: remove target first
+    try {
+      const stat = fs.statSync(targetFile);
+      if (stat.isDirectory()) {
+        fs.rmSync(targetFile, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(targetFile);
+      }
+    } catch (err) {
+      return { success: false, message: `Failed to remove existing file: ${err.message}` };
+    }
+  }
+
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
-  const targetFile = path.join(targetDir, path.basename(physicalPath));
+
   safeMoveDir(physicalPath, targetFile);
-  return { success: true, targetPath: targetFile };
+
+  // Synchronize configuration manifests
+  try {
+    const isSkill = category === 'skill' || (physicalPath.endsWith('.md') && physicalPath.toLowerCase().includes('skills'));
+    const isPlugin = category === 'plugin' || fs.existsSync(path.join(targetFile, 'plugin.json'));
+
+    if (isSkill) {
+      const globalSkillsJson = getGlobalSkillsJsonPath();
+      removeExcludeFromJsonConfig(globalSkillsJson, filename);
+      if (enableInWorkspaceRoot) {
+        await toggleSkillProject(enableInWorkspaceRoot, targetFile, filename, 'enable', lang);
+      }
+    } else if (isPlugin) {
+      const globalPluginsJson = getGlobalPluginsJsonPath();
+      setPluginManifestDisabled(targetFile, false);
+      removeAntigravityPluginFromConfig(filename);
+      removeExcludeFromJsonConfig(globalPluginsJson, filename);
+    }
+  } catch (syncErr) {
+    logDebug(`Error syncing configs after move: ${syncErr.message}`);
+  }
+
+  return { success: true, targetPath: targetFile, filename: filename };
 }
 
 // Migrate storage folders to new structure on storage path change

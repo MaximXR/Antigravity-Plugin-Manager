@@ -662,6 +662,58 @@
         </div>
       </div>
     </div>
+
+    <!-- Move Resource Modal -->
+    <div id="move-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-glass); border-radius: 12px; width: 100%; max-width: 520px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-glass);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">📦</span>
+            <div>
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #f1f5f9;" id="move-modal-title">{{modalMoveTitle}}</h3>
+              <p style="margin: 0; font-size: 11px; color: var(--text-muted);" id="move-modal-subtitle"></p>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; height: 24px;" onclick="closeMoveModal()">✕</button>
+        </div>
+        <div id="move-modal-body" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
+          <div id="move-current-info" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 8px 12px; font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px;">
+            <span style="font-weight: 600; color: #94a3b8;">{{moveCurrentLocation}}</span>
+            <span id="move-current-path" style="word-break: break-all; font-family: monospace; color: #cbd5e1;"></span>
+          </div>
+
+          <label class="storage-title" style="margin-top: 4px;">{{moveDestinationLabel}}</label>
+          <div id="move-destinations-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; padding-right: 2px;">
+            <!-- Rendered dynamically by modals.js -->
+          </div>
+
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="move-target-radio" id="move-radio-custom" value="custom" onchange="onMoveTargetRadioChange()">
+              <span>📂 {{moveCustomFolderLabel}}</span>
+            </label>
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <input type="text" id="move-custom-path-input" class="search-input" placeholder="C:\path\to\folder" style="font-size: 11px; flex: 1;" oninput="onMoveCustomPathInput()">
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; height: 28px;" onclick="requestBrowseCustomFolder()">{{moveBrowseFolder}}</button>
+            </div>
+          </div>
+
+          <div id="move-conflict-box" style="display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; font-size: 11px; color: #fca5a5; display: flex; flex-direction: column; gap: 6px;">
+            <span id="move-conflict-msg"></span>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #f87171; font-weight: 600;">
+              <input type="checkbox" id="move-overwrite-checkbox">
+              <span>{{btnOverwrite}}</span>
+            </label>
+          </div>
+
+          <div id="move-error-box" style="display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 12px; font-size: 11px; color: #fca5a5;"></div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-glass); background: rgba(0,0,0,0.15);">
+          <button class="btn btn-secondary" onclick="closeMoveModal()">{{btnCancel}}</button>
+          <button class="btn" id="btn-confirm-move" style="background: var(--primary-gradient); color: white;" onclick="submitMoveItem()">{{btnMove}}</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- INJECT_SCRIPT -->

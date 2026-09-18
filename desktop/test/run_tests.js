@@ -114,6 +114,7 @@ async function run() {
   // Determine suite files to load
   const testDir = __dirname;
   const suiteFiles = [
+    { tier: '1', file: 'move_architecture.test.js' },
     { tier: '1', file: 'tier1_features.test.js' },
     { tier: '2', file: 'tier2_boundary.test.js' },
     { tier: '3', file: 'tier3_combinations.test.js' },

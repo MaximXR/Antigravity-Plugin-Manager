@@ -1,5 +1,23 @@
 # История изменений / Changelog
 
+## 1.2.20
+
+### Русский
+* **Чистая трехслойная архитектура перемещения ресурсов (3-Tier Clean Move Architecture):**
+  - Реализован перенос ресурсов (плагины, навыки, воркфлоу, правила, MCP-серверы и хуки) в **AI Skill & Plugin Manager Desktop**: теперь в десктопной версии доступен полный функционал перемещения с выбором целевых папок.
+  - Строгое разделение обязанностей (Separation of Concerns): сервисный слой ядра (`services/fsUtils.js`, `services/actions.js`) отвечает за вычисление доступных целей (`getMoveDestinations`) и физический перенос с авто-маршрутизацией (`actions.moveItem`), хосты (`desktop/main.js`, `extension.js`) предоставляют системные диалоги выбора папок ОС, а фронтенд (`webview/`) использует универсальное модальное окно `#move-modal`.
+  - Предотвращение коллизий: обнаружение совпадающих файлов на целевом диске с предупреждением и возможностью подтверждения перезаписи.
+  - Поддержка выбора произвольной папки на диске через системный диалог Проводника.
+  - Автоматическая синхронизация правил `exclude` в `skills.json` и `plugins.json` при переносе между локальными проектами, глобальным каталогом и подключенными репозиториями.
+
+### English
+* **Clean 3-Tier Move Architecture (Desktop & IDE):**
+  - Fully enabled resource moving (plugins, skills, workflows, rules, MCP servers, and hooks) in **AI Skill & Plugin Manager Desktop**: Desktop users now enjoy full relocation capabilities across scopes.
+  - Strict Separation of Concerns (SoC): Core services (`services/fsUtils.js`, `services/actions.js`) handle target destination resolution (`getMoveDestinations`) and collision-safe physical file operations (`actions.moveItem`), platform hosts (`desktop/main.js`, `extension.js`) provide native OS folder dialogs, and the frontend (`webview/`) presents a unified `#move-modal`.
+  - Collision Detection: Prevents accidental overwrites with automatic conflict detection and an explicit overwrite confirmation toggle.
+  - Custom Folder Picker: Direct browsing of any disk destination folder via native OS directory dialogs.
+  - Automatic Manifest Sync: Seamless updates of `exclude` lists in `skills.json` and `plugins.json` when migrating resources across workspace projects, global scope, and connected folders.
+
 ## 1.2.19
 
 ### Русский

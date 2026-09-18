@@ -480,3 +480,168 @@ function executePluginUpdate() {
   });
 }
 window.executePluginUpdate = executePluginUpdate;
+
+// --- Move Resource Modal (Clean 3-Tier Architecture) ---
+let currentMoveData = null;
+
+function openMoveModal(msgData) {
+  const modal = document.getElementById('move-modal');
+  if (!modal) return;
+
+  const data = msgData.data || msgData;
+  currentMoveData = {
+    itemId: data.itemId || '',
+    category: data.category || '',
+    sourcePath: data.sourcePath || '',
+    destinations: data.destinations || [],
+    enableInWorkspaceRoot: data.enableInWorkspaceRoot || null
+  };
+
+  const subtitleEl = document.getElementById('move-modal-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = `${currentMoveData.itemId} (${currentMoveData.category})`;
+  }
+
+  const currentPathEl = document.getElementById('move-current-path');
+  if (currentPathEl) {
+    currentPathEl.textContent = currentMoveData.sourcePath || '—';
+  }
+
+  const conflictBox = document.getElementById('move-conflict-box');
+  if (conflictBox) conflictBox.style.display = 'none';
+
+  const errorBox = document.getElementById('move-error-box');
+  if (errorBox) errorBox.style.display = 'none';
+
+  const customPathInput = document.getElementById('move-custom-path-input');
+  if (customPathInput) customPathInput.value = '';
+
+  const listEl = document.getElementById('move-destinations-list');
+  if (listEl) {
+    if (currentMoveData.destinations.length === 0) {
+      listEl.innerHTML = `<div style="font-size: 11px; color: var(--text-muted); padding: 8px 4px;">${t('noDestinationsAvailable', 'No standard destinations available. Choose a custom folder below.')}</div>`;
+    } else {
+      listEl.innerHTML = currentMoveData.destinations.map((d, index) => {
+        const isChecked = index === 0 ? 'checked' : '';
+        return `
+          <label style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; cursor: pointer; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='rgba(255,255,255,0.02)'">
+            <input type="radio" name="move-target-radio" value="${escapeHtml(d.targetParent)}" ${isChecked} style="margin-top: 2px;" onchange="onMoveTargetRadioChange()">
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+              <span style="font-size: 12px; font-weight: 500; color: #f1f5f9;">${d.icon || '📁'} ${escapeHtml(d.label)}</span>
+              <span style="font-size: 10px; color: var(--text-muted); word-break: break-all; font-family: monospace;">${escapeHtml(d.description || d.targetParent)}</span>
+            </div>
+          </label>
+        `;
+      }).join('');
+    }
+  }
+
+  modal.style.display = 'flex';
+}
+window.openMoveModal = openMoveModal;
+
+function closeMoveModal() {
+  const modal = document.getElementById('move-modal');
+  if (modal) modal.style.display = 'none';
+  currentMoveData = null;
+}
+window.closeMoveModal = closeMoveModal;
+
+function onMoveTargetRadioChange() {
+  const conflictBox = document.getElementById('move-conflict-box');
+  if (conflictBox) conflictBox.style.display = 'none';
+  const errorBox = document.getElementById('move-error-box');
+  if (errorBox) errorBox.style.display = 'none';
+}
+window.onMoveTargetRadioChange = onMoveTargetRadioChange;
+
+function onMoveCustomPathInput() {
+  const customRadio = document.getElementById('move-radio-custom');
+  if (customRadio) customRadio.checked = true;
+  onMoveTargetRadioChange();
+}
+window.onMoveCustomPathInput = onMoveCustomPathInput;
+
+function requestBrowseCustomFolder() {
+  vscode.postMessage({
+    command: 'chooseCustomMoveFolder'
+  });
+}
+window.requestBrowseCustomFolder = requestBrowseCustomFolder;
+
+function onCustomMoveFolderChosen(folderPath) {
+  if (!folderPath) return;
+  const input = document.getElementById('move-custom-path-input');
+  if (input) {
+    input.value = folderPath;
+  }
+  const customRadio = document.getElementById('move-radio-custom');
+  if (customRadio) {
+    customRadio.checked = true;
+  }
+  onMoveTargetRadioChange();
+}
+window.onCustomMoveFolderChosen = onCustomMoveFolderChosen;
+
+function showMoveConflict(msg) {
+  const conflictBox = document.getElementById('move-conflict-box');
+  const msgEl = document.getElementById('move-conflict-msg');
+  if (conflictBox && msgEl) {
+    msgEl.textContent = msg || t('moveConflictWarning', 'Target already exists. Overwrite?');
+    const chk = document.getElementById('move-overwrite-checkbox');
+    if (chk) chk.checked = true;
+    conflictBox.style.display = 'flex';
+  }
+}
+window.showMoveConflict = showMoveConflict;
+
+function showMoveError(msg) {
+  const errorBox = document.getElementById('move-error-box');
+  if (errorBox) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+}
+window.showMoveError = showMoveError;
+
+function submitMoveItem() {
+  if (!currentMoveData || !currentMoveData.sourcePath) return;
+
+  const customRadio = document.getElementById('move-radio-custom');
+  let selectedTargetDir = '';
+
+  if (customRadio && customRadio.checked) {
+    const customInput = document.getElementById('move-custom-path-input');
+    selectedTargetDir = customInput ? customInput.value.trim() : '';
+    if (!selectedTargetDir) {
+      showMoveError(t('customFolderEmpty', 'Please specify or browse a destination folder.'));
+      return;
+    }
+  } else {
+    const checkedRadio = document.querySelector('input[name="move-target-radio"]:checked');
+    if (checkedRadio) {
+      selectedTargetDir = checkedRadio.value;
+    }
+  }
+
+  if (!selectedTargetDir) {
+    showMoveError(t('selectDestinationFolder', 'Please select a destination.'));
+    return;
+  }
+
+  const overwriteCheckbox = document.getElementById('move-overwrite-checkbox');
+  const isOverwrite = overwriteCheckbox ? overwriteCheckbox.checked : false;
+
+  setSyncingState(2500);
+  vscode.postMessage({
+    command: 'executeMove',
+    physicalPath: currentMoveData.sourcePath,
+    targetDir: selectedTargetDir,
+    overwrite: isOverwrite,
+    category: currentMoveData.category,
+    itemId: currentMoveData.itemId,
+    enableInWorkspaceRoot: currentMoveData.enableInWorkspaceRoot
+  });
+}
+window.submitMoveItem = submitMoveItem;
+
