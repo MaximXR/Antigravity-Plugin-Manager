@@ -521,6 +521,19 @@ function createMainWindow() {
 
   mainWindow.setMenuBarVisibility(false);
 
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, msg, line, src) => {
+    if (level >= 2 || (typeof msg === 'string' && msg.includes('Error'))) {
+      fsUtils.logDebug(`[RENDERER CONSOLE] (${src}:${line}) [lvl:${level}] ${msg}`);
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -734,6 +747,11 @@ ipcMain.on('to-backend', async (event, message) => {
 
   try {
     switch (cmd) {
+      case 'clientError': {
+        fsUtils.logDebug(`[CLIENT ERROR] ${message.error || ''} at ${message.source || ''}:${message.lineno || ''}`);
+        break;
+      }
+
       case 'init':
       case 'ready':
       case 'refresh': {
@@ -1124,6 +1142,7 @@ ipcMain.on('to-backend', async (event, message) => {
 
       case 'requestMove':
       case 'requestMoveTargets': {
+        fsUtils.logDebug(`[MOVE] requestMove: ${message.itemId || ''} (${message.category || ''}) path=${message.physicalPath || ''}`);
         if (message.targetDir && message.physicalPath) {
           // Direct execution if targetDir is already specified
           const moveRes = await actions.moveItem(message.physicalPath, message.targetDir, {
@@ -1160,6 +1179,7 @@ ipcMain.on('to-backend', async (event, message) => {
         } else {
           // Calculate destinations and open universal move modal
           const targetRes = fsUtils.getMoveDestinations(message, workspaceRoots, activeLanguage);
+          fsUtils.logDebug(`[MOVE] getMoveDestinations: ${targetRes.destinations.length} destinations found`);
           if (!targetRes.success && targetRes.isProtected) {
             event.sender.send('from-backend', {
               command: 'error',
@@ -1188,13 +1208,14 @@ ipcMain.on('to-backend', async (event, message) => {
             });
           }
         } catch (e) {
-          logDebug(`Error opening move folder dialog: ${e.message}`);
+          fsUtils.logDebug(`Error opening move folder dialog: ${e.message}`);
         }
         break;
       }
 
       case 'executeMove':
       case 'moveItem': {
+        fsUtils.logDebug(`[MOVE] executeMove: ${message.physicalPath} -> ${message.targetDir} (overwrite=${!!message.overwrite})`);
         if (message.targetDir && message.physicalPath) {
           const moveRes = await actions.moveItem(message.physicalPath, message.targetDir, {
             lang: activeLanguage,

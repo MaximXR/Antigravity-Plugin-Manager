@@ -128,8 +128,25 @@ describe('3-Tier Clean Move Architecture Suite', () => {
     assert.strictEqual(res.success, true);
     const srcData = JSON.parse(fs.readFileSync(srcJson, 'utf8'));
     const tgtData = JSON.parse(fs.readFileSync(tgtJson, 'utf8'));
-
     assert.strictEqual(srcData['test-hook'], undefined);
     assert.deepStrictEqual(tgtData['test-hook'], { command: 'echo test', event: 'post-commit' });
   });
+
+  test('HTML layout: #move-modal is independent and div tags balance to zero', () => {
+    const htmlPath = path.join(__dirname, '..', '..', 'webview', 'index.html');
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    const opens = (html.match(/<div\b/g) || []).length;
+    const closes = (html.match(/<\/div>/g) || []).length;
+    assert.strictEqual(opens - closes, 0, `<div> and </div> must be balanced, got diff=${opens - closes}`);
+
+    const liveIdx = html.indexOf('id="live-context-modal"');
+    const moveIdx = html.indexOf('id="move-modal"');
+    assert.strictEqual(liveIdx !== -1 && moveIdx !== -1, true, 'Both modals must exist');
+
+    const slice = html.substring(liveIdx, moveIdx);
+    const sliceOpens = (slice.match(/<div\b/g) || []).length;
+    const sliceCloses = (slice.match(/<\/div>/g) || []).length;
+    assert.strictEqual(sliceOpens - sliceCloses, 0, '#live-context-modal must be closed before #move-modal');
+  });
 });
+

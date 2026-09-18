@@ -139,7 +139,6 @@ function toggleMcpServer(physicalPath, serverName, enable) {
 window.toggleMcpServer = toggleMcpServer;
 
 function moveItem(itemId, category, sourcePluginId, isEnabled, isLocal, physicalPath) {
-  setSyncingState(2100);
   vscode.postMessage({
     command: 'requestMove',
     itemId: itemId,
