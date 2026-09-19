@@ -58,8 +58,7 @@
     ],
     "win": {
       "target": [
-        "zip",
-        "portable"
+        "zip"
       ],
       "icon": "../resources/icon.ico"
     }
