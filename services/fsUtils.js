@@ -8,6 +8,16 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+let translationsModule;
+try {
+  translationsModule = require('../locales/translations');
+} catch (e) {
+  try {
+    translationsModule = require('./locales/translations');
+  } catch (_) {}
+}
+const translations = (translationsModule && translationsModule.translations) || {};
+
 // Helper to log errors or debug info
 function logDebug(message) {
   try {
@@ -1460,6 +1470,74 @@ function getWebviewScript(webviewDir) {
   return '';
 }
 
+/**
+ * Universal HTML Template Hydration Engine (SSOT)
+ * Hydrates webview/index.html with translation dictionary, user settings, and fallback labels.
+ */
+function hydrateWebviewHtml(html, lang = 'en', configLang = 'auto') {
+  if (!lang) lang = 'en';
+  const langKey = lang.toLowerCase().split('-')[0];
+  const dict = translations[langKey] || translations['ru'] || translations['en'] || {};
+  const enDict = translations['en'] || {};
+
+  // 1. Language selector options
+  html = html.replace(/\{\{lang\}\}/g, lang);
+  html = html.replace(/\{\{configLangAuto\}\}/g, configLang === 'auto' ? 'selected' : '');
+  html = html.replace(/\{\{configLangEn\}\}/g, configLang === 'en' ? 'selected' : '');
+  html = html.replace(/\{\{configLangRu\}\}/g, configLang === 'ru' ? 'selected' : '');
+
+  // 2. Dictionary token replacements
+  html = html.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (match, key) => {
+    if (dict[key] !== undefined) {
+      return dict[key];
+    }
+    if (key.endsWith('Esc')) {
+      const baseKey = key.slice(0, -3);
+      if (dict[baseKey] !== undefined) {
+        return String(dict[baseKey]).replace(/"/g, '&quot;');
+      }
+    }
+    if (enDict[key] !== undefined) {
+      return enDict[key];
+    }
+    if (key.endsWith('Esc')) {
+      const baseKey = key.slice(0, -3);
+      if (enDict[baseKey] !== undefined) {
+        return String(enDict[baseKey]).replace(/"/g, '&quot;');
+      }
+    }
+    return match;
+  });
+
+  // 3. Fallback explicit labels
+  const manualReplacements = {
+    openActiveFolderBtn: langKey === 'ru' ? 'Открыть папку Plugins' : 'Open Active Folder',
+    openStorageFolderBtn: langKey === 'ru' ? 'Открыть Хранилище' : 'Open Storage Folder',
+    openFolderBtn: langKey === 'ru' ? 'Открыть папку' : 'Open folder',
+    openPluginFolderBtn: langKey === 'ru' ? 'Открыть папку плагина' : 'Open plugin folder',
+    createSkillBtn: langKey === 'ru' ? 'Создать навык' : 'Create Skill',
+    createScriptsLabel: langKey === 'ru' ? 'Создать папку scripts (фоновые утилиты)' : 'Create scripts folder (background utilities)',
+    createExamplesLabel: langKey === 'ru' ? 'Создать папку examples (примеры)' : 'Create examples folder (examples)',
+    createDocsLabel: langKey === 'ru' ? 'Создать папку docs (документация)' : 'Create docs folder (documentation)',
+    createResourcesLabel: langKey === 'ru' ? 'Создать папку resources (ресурсы)' : 'Create resources folder (resources)',
+    deleteBtn: langKey === 'ru' ? 'Удалить' : 'Delete',
+    refreshBtn: langKey === 'ru' ? 'Обновить' : 'Refresh',
+    searchPlaceholder: langKey === 'ru' ? 'Поиск...' : 'Search...',
+    layoutModeText: langKey === 'ru' ? 'В 1 колонку' : '1 Column',
+    viewModeText: langKey === 'ru' ? 'Подробно' : 'Detailed',
+    groupingModeText: langKey === 'ru' ? 'Группировка: Выкл' : 'Grouping: Off',
+    detailLayoutModeText: langKey === 'ru' ? 'В 1 колонку' : '1 Column',
+    detailViewModeText: langKey === 'ru' ? 'Подробно' : 'Detailed',
+    btnClose: langKey === 'ru' ? 'Закрыть' : 'Close'
+  };
+
+  for (const [k, v] of Object.entries(manualReplacements)) {
+    html = html.split(`{{${k}}}`).join(v);
+  }
+
+  return html;
+}
+
 // Calculate available move destinations for a resource (Clean 3-Tier Move Architecture)
 function getMoveDestinations(moveMsg, workspaceRoots = [], lang = 'en') {
   if (!moveMsg) return { success: false, destinations: [] };
@@ -1778,6 +1856,7 @@ module.exports = {
   migrateFromLegacyStorage,
   getWorkspaceCustomizationDirs,
   getMarkdownFilesRecursive,
-  getMoveDestinations
+  getMoveDestinations,
+  hydrateWebviewHtml
 };
 

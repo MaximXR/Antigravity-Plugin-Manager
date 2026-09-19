@@ -57,7 +57,7 @@
 ├── .gitignore                 # Исключения для Git
 │
 ├── services/                  # Сервисный слой бэкенда (SSOT ядра)
-│   ├── fsUtils.js             # Системные пути, getWebviewScript, safeMoveDir, парсер frontmatter
+│   ├── fsUtils.js             # Системные пути, hydrateWebviewHtml, getWebviewScript, safeMoveDir, парсер frontmatter
 │   ├── scanners.js            # Сканирование ресурсов (плагины, навыки, сценарии, правила, MCP, хуки)
 │   ├── updater.js             # Движок проверки обновлений (GitHub Raw HEAD) и доставки через Git
 │   └── actions.js             # Мутации: toggleItem, createItem, deleteItem, moveItem, toggleHook
@@ -122,7 +122,7 @@
 | Задача | Файлы для изменения | Что делать / Инструкция |
 | :--- | :--- | :--- |
 | **Добавить/изменить сканирование файлов или обнаружение** | [/services/scanners.js](/services/scanners.js) | Функции `scan*` (`scanPlugins`, `scanSkills`, `scanBuiltin*`, `scanAllRules`, `scanAllMcpServers`, `scanAllHooks`). Логика обнаружения и фильтрации находится здесь. |
-| **Изменить механизм путей, ссылок или сборки скриптов** | [/services/fsUtils.js](/services/fsUtils.js) | Функции путей `getActive*Path`, `getBuiltinPath`, `getWebviewScript`, `safeMoveDir`, `createLink`, `parseFrontmatter`, `readPluginInfo`. |
+| **Изменить механизм путей, ссылок, сборки скриптов или гидратации шаблонов** | [/services/fsUtils.js](/services/fsUtils.js) | Функции путей `getActive*Path`, `getBuiltinPath`, `getWebviewScript`, `hydrateWebviewHtml`, `safeMoveDir`, `createLink`, `parseFrontmatter`, `readPluginInfo`. |
 | **Изменить операции включения/выключения, создания, удаления, перемещения** | [/services/actions.js](/services/actions.js) | Функции `toggleItem`, `createItem`, `deleteItem`, `moveItem`, `toggleHook`. Помнить: для плагинов активное состояние — физическая папка в `plugins/`, синхронизация в `plugin.json` и `config.json`. |
 | **Изменить проверку или доставку обновлений плагинов** | [/services/updater.js](/services/updater.js), [/extension.js](/extension.js), [/webview/js/modals.js](/webview/js/modals.js) | Функции `checkPluginUpdate`, `checkAllUpdates`, `updatePlugin`. Логика парсинга репозиториев, сравнения semver и гибридной доставки через Git. |
 | **Добавить новый бэкенд-метод или IPC команду** | [/extension.js](/extension.js), [/desktop/main.js](/desktop/main.js), [/webview/js/ipc.js](/webview/js/ipc.js) | В `extension.js` и `desktop/main.js` добавить `case 'commandName'`. Во фронтенде вызывать `vscode.postMessage({ command: 'commandName', ... })`. |
@@ -450,6 +450,11 @@
     - При подготовке релиза на GitHub (`gh release create`) и Open VSX ИИ **ОБЯЗАН** проверить историю ранее опубликованных релизов через `gh release list`.
     - Если между последним опубликованным релизом и текущей версией были промежуточные версии (например, последний релиз `v1.2.17`, а текущий `v1.2.20`, при этом `1.2.18` и `1.2.19` не публиковались как GitHub Releases), описание релиза **ОБЯЗАТЕЛЬНО** формируется кумулятивным — включает все блоки чейнджлога начиная от версии, следующей за последним релизом, до текущей включительно (`1.2.18` — `1.2.20`).
     - В релиз GitHub прикладываются: `.vsix` пакет расширения IDE и быстрый портативный `.zip` десктопного приложения (`AI Skill & Plugin Manager Desktop-<version>-win.zip`). Тяжелый single-file exe (`portable`) исключен из автоматической сборки для ускорения процесса компиляции.
+42. **Единый движок гидратации HTML-шаблонов (SSOT Webview HTML Hydration):**
+    - Для исключения утечек сырых тегов (`{{...}}`) в интерфейсе IDE Extension (`extension.js`) и Electron Desktop (`desktop/main.js`) **СТРОГО ЗАПРЕЩЕНО** использовать статические ручные словари замен.
+    - Вся гидратация `webview/index.html` осуществляется исключительно через универсальный движок `fsUtils.hydrateWebviewHtml(rawHtml, lang, configLang)`.
+    - Движок автоматически транслирует любые плейсхолдеры шаблона на основе словаря `locales/translations.js`, обеспечивает fallback на английский язык, экранирование кавычек в директивах `...Esc` и корректный выбор языка.
+    - Покрытие всех токенов валидируется автоматическим тестом `desktop/test/html_hydration.test.js`.
 
 ---
 

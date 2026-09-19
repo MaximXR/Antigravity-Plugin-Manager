@@ -61,6 +61,9 @@ if not exist node_modules (
     call npm install
 )
 
+:: Close running desktop instance to release file locks
+taskkill /f /im "AI Skill & Plugin Manager Desktop.exe" >nul 2>&1
+
 call npm run build
 if %errorlevel% neq 0 (
     echo [ERROR] Desktop build failed!

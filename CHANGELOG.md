@@ -1,5 +1,21 @@
 # История изменений / Changelog
 
+## 1.2.21
+
+### Русский
+* **Унифицированный движок гидратации шаблона Webview (SSOT HTML Hydration):**
+  - Устранена утечка непереведенных тегов шаблона (`{{modalMoveTitle}}`, `{{moveCurrentLocation}}`, `{{moveDestinationLabel}}`, `{{moveCustomFolderLabel}}`, `{{moveBrowseFolder}}`, `{{btnMove}}`, `{{btnOverwrite}}`) в расширении IDE.
+  - Упразднен устаревший ручной словарь замен в `extension.js`, приводивший к рассинхронизации при добавлении новых модальных окон и элементов.
+  - В `services/fsUtils.js` реализован универсальный движок `hydrateWebviewHtml`, ставший единым источником правды для IDE Extension и Electron Desktop. Движок автоматически подставляет токены локализации из `locales/translations.js` с fallback на английский язык и экранированием `...Esc`.
+  - Добавлен автоматический E2E/Unit тест `desktop/test/html_hydration.test.js`, валидирующий 100% покрытие всех `{{плейсхолдеров}}` в `webview/index.html` для русского и английского языков.
+
+### English
+* **Unified Webview HTML Hydration Engine (SSOT HTML Hydration):**
+  - Resolved raw template placeholder leaks (`{{modalMoveTitle}}`, `{{moveCurrentLocation}}`, `{{moveDestinationLabel}}`, `{{moveCustomFolderLabel}}`, `{{moveBrowseFolder}}`, `{{btnMove}}`, `{{btnOverwrite}}`) in the IDE Extension.
+  - Replaced obsolete 100-line static replacements map in `extension.js` with universal dynamic token hydration.
+  - Introduced `fsUtils.hydrateWebviewHtml` as Single Source of Truth (SSOT) shared across IDE Extension and Electron Desktop. The engine dynamically maps translation tokens from `locales/translations.js` with full English fallback and `...Esc` quote escaping.
+  - Added automated test suite `desktop/test/html_hydration.test.js` asserting 100% token resolution across all supported locales without unhydrated template tags.
+
 ## 1.2.20
 
 ### Русский

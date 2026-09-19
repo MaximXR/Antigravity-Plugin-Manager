@@ -361,65 +361,12 @@ function getHtmlContent(lang = activeLanguage) {
   const css = fs.readFileSync(cssPath, 'utf8');
   const js = fsUtils.getWebviewScript(resolveWebviewPath(''));
 
+  // Universal SSOT hydration
+  html = fsUtils.hydrateWebviewHtml(html, lang, 'auto');
+
   const dict = translations[lang] || translations['ru'] || translations['en'] || {};
-  const enDict = translations['en'] || {};
 
-  // 1. Language selector options
-  html = html.replace(/\{\{lang\}\}/g, lang);
-  html = html.replace(/\{\{configLangAuto\}\}/g, lang === 'auto' ? 'selected' : '');
-  html = html.replace(/\{\{configLangEn\}\}/g, lang === 'en' ? 'selected' : '');
-  html = html.replace(/\{\{configLangRu\}\}/g, lang === 'ru' ? 'selected' : '');
-
-  // 2. Dictionary token replacements
-  html = html.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (match, key) => {
-    if (dict[key] !== undefined) {
-      return dict[key];
-    }
-    if (key.endsWith('Esc')) {
-      const baseKey = key.slice(0, -3);
-      if (dict[baseKey] !== undefined) {
-        return String(dict[baseKey]).replace(/"/g, '&quot;');
-      }
-    }
-    if (enDict[key] !== undefined) {
-      return enDict[key];
-    }
-    if (key.endsWith('Esc')) {
-      const baseKey = key.slice(0, -3);
-      if (enDict[baseKey] !== undefined) {
-        return String(enDict[baseKey]).replace(/"/g, '&quot;');
-      }
-    }
-    return match;
-  });
-
-  // 3. Fallback explicit labels
-  const manualReplacements = {
-    openActiveFolderBtn: lang === 'ru' ? 'Открыть папку Plugins' : 'Open Active Folder',
-    openStorageFolderBtn: lang === 'ru' ? 'Открыть Хранилище' : 'Open Storage Folder',
-    openFolderBtn: lang === 'ru' ? 'Открыть папку' : 'Open folder',
-    openPluginFolderBtn: lang === 'ru' ? 'Открыть папку плагина' : 'Open plugin folder',
-    createSkillBtn: lang === 'ru' ? 'Создать навык' : 'Create Skill',
-    createScriptsLabel: lang === 'ru' ? 'Создать папку scripts (фоновые утилиты)' : 'Create scripts folder (background utilities)',
-    createExamplesLabel: lang === 'ru' ? 'Создать папку examples (примеры)' : 'Create examples folder (examples)',
-    createDocsLabel: lang === 'ru' ? 'Создать папку docs (документация)' : 'Create docs folder (documentation)',
-    createResourcesLabel: lang === 'ru' ? 'Создать папку resources (ресурсы)' : 'Create resources folder (resources)',
-    deleteBtn: lang === 'ru' ? 'Удалить' : 'Delete',
-    refreshBtn: lang === 'ru' ? 'Обновить' : 'Refresh',
-    searchPlaceholder: lang === 'ru' ? 'Поиск...' : 'Search...',
-    layoutModeText: lang === 'ru' ? 'В 1 колонку' : '1 Column',
-    viewModeText: lang === 'ru' ? 'Подробно' : 'Detailed',
-    groupingModeText: lang === 'ru' ? 'Группировка: Выкл' : 'Grouping: Off',
-    detailLayoutModeText: lang === 'ru' ? 'В 1 колонку' : '1 Column',
-    detailViewModeText: lang === 'ru' ? 'Подробно' : 'Detailed',
-    btnClose: lang === 'ru' ? 'Закрыть' : 'Close'
-  };
-
-  for (const [k, v] of Object.entries(manualReplacements)) {
-    html = html.split(`{{${k}}}`).join(v);
-  }
-
-  // 4. Inject styles and scripts with universal bridge adapter
+  // Inject styles and scripts with universal bridge adapter
   const i18nScript = `
 <script>
 window.LANG = ${JSON.stringify(lang)};
