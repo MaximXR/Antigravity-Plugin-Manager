@@ -17,7 +17,7 @@
 1. **Встроенное расширение для Antigravity IDE:** панель управления прямо в Activity Bar редактора с тумблерами, мягким перезапуском сервера (Soft Apply) и счетчиком в статус-баре.
 2. **Автономное приложение AI Skill & Plugin Manager Desktop:** независимая настольная программа для пользователей обычного **Antigravity 2.0 (Desktop)** и консоли **Antigravity CLI (`agy`)**. Работает автономно без запущенного редактора, сворачивается в системный трей и позволяет переключать контекст между любыми проектами на лету.
 
-👉 **[Скачать расширение (.vsix) или Desktop-приложение (.exe / .zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Портативно и без установки • Бесплатно и с открытым исходным кодом
+👉 **[Скачать расширение (.vsix) или Desktop-приложение (.zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)** • Портативно и без установки • Бесплатно и с открытым исходным кодом
 
 ![Панель управления Менеджера плагинов](resources/screenshot-webview-ru.png)
 
@@ -77,17 +77,16 @@ Antigravity штатно поддерживает управление акти�
 ### Установка и запуск
 
 #### Вариант 1: Встроенное расширение для Antigravity IDE (.vsix)
-1. Скачайте актуальный файл `.vsix` со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)**.
+1. Скачайте актуальный файл `.vsix` со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)**.
 2. В Antigravity IDE откройте панель расширений (`Ctrl+Shift+X`).
 3. Нажмите на меню с тремя точками `...` в правом верхнем углу панели ➔ **Install from VSIX...** и выберите скачанный файл.
 
-#### Вариант 2: Автономное приложение AI Skill & Plugin Manager Desktop (Оба формата портативные!)
+#### Вариант 2: Автономное приложение AI Skill & Plugin Manager Desktop (Портативный .zip)
 
-Выберите удобный формат со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** (оба варианта не требуют установки и не засоряют систему):
-* ⚡ **Архив `.zip` (Портативный, мгновенный запуск — Рекомендуется):** распакуйте в любую папку и запускайте. Поскольку файлы уже распакованы на диске, приложение стартует молниеносно.
-* 📦 **Одиночный `.exe` (Портативный в один файл):** идеален, чтобы запустить в 1 клик без распаковки архивов или носить с собой на флешке. При старте тихо разворачивается во временную папку ОС (запуск занимает на 1–2 секунды дольше).
+Скачайте архив приложения со страницы **[Релизов](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)**:
+* ⚡ **Портативный архив `.zip` (Мгновенный запуск без установки):** распакуйте в любую удобную папку и запускайте `AI Skill & Plugin Manager Desktop.exe`. Приложение стартует молниеносно, не требует прав администратора и не засоряет реестр Windows.
 
-Приложение сразу готово к работе: оно автоматически определяет активный проект Antigravity 2.0 и сворачивается в трей по нажатию крестика.
+Приложение сразу готово к работе: оно автоматически определяет активный проект Antigravity 2.0 и сворачивается в системный трей по нажатию крестика.
 
 > 💡 **Сборка из исходников:**
 > Склонируйте репозиторий и запустите диспетчер сборки `build.bat` в корне:
@@ -119,7 +118,7 @@ Available in two convenient form factors:
 1. **Built-in Antigravity IDE Extension:** full control panel in the IDE Activity Bar with 1-click toggles, background Soft Apply, and a live context status bar counter.
 2. **Standalone AI Skill & Plugin Manager Desktop:** independent Electron desktop app for users of standard **Antigravity 2.0 (Desktop)** and **Antigravity CLI (`agy`)**. Runs without VS Code, minimizes to the system tray, and enables seamless project switching on the fly.
 
-👉 **[Download Extension (.vsix) or Desktop App (.exe / .zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** • Portable & Zero-Install • Free & Open Source
+👉 **[Download Extension (.vsix) or Desktop App (.zip)](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)** • Portable & Zero-Install • Free & Open Source
 
 ![Plugin Manager Control Panel](resources/screenshot-webview-en.png)
 
@@ -179,15 +178,14 @@ Plugin and skill directories always remain in their original locations. The mana
 ### Installation & Launch
 
 #### Option 1: Built-in Extension for Antigravity IDE (.vsix)
-1. Download the `.vsix` file from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page.
+1. Download the `.vsix` file from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)** page.
 2. In Antigravity IDE, open the Extensions panel (`Ctrl+Shift+X`).
 3. Click the `...` menu (top-right corner of the Extensions panel) ➔ **Install from VSIX...** and select the downloaded file.
 
-#### Option 2: Standalone AI Skill & Plugin Manager Desktop (Both Formats Are 100% Portable!)
+#### Option 2: Standalone AI Skill & Plugin Manager Desktop (Portable .zip)
 
-Choose your preferred format from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases)** page (neither requires installation or admin rights):
-* ⚡ **`.zip` Archive (Portable, Instant Startup — Recommended):** Unpack anywhere and launch. Because all binaries are already unpacked on disk, it opens instantly without delay.
-* 📦 **Single `.exe` (Single-File Portable):** Perfect for USB flash drives or launching in 1 click without extracting. Quietly unpacks into the system temporary folder on startup (takes 1–2 seconds to initialize).
+Download the application archive from the **[Releases](https://github.com/MaximXR/Antigravity-Plugin-Manager/releases/latest#:~:text=Assets)** page:
+* ⚡ **Portable `.zip` Archive (Instant Startup, Zero-Install):** Extract to any folder and launch `AI Skill & Plugin Manager Desktop.exe`. It starts immediately, requires no administrator privileges, and leaves zero registry traces.
 
 The app starts immediately, auto-detects your active Antigravity 2.0 project, and minimizes to the system tray upon closing.
 
