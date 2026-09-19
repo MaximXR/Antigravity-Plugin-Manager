@@ -1,7 +1,7 @@
 {
   "name": "antigravity-plugin-manager-desktop",
   "productName": "AI Skill & Plugin Manager Desktop",
-  "version": "1.2.20",
+  "version": "1.2.21-dev",
   "description": "Standalone desktop AI context manager for Antigravity 2.0 and CLI",
   "main": "main.js",
   "author": "MaximXR",
