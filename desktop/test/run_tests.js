@@ -116,10 +116,9 @@ async function run() {
   const suiteFiles = [
     { tier: '1', file: 'move_architecture.test.js' },
     { tier: '1', file: 'html_hydration.test.js' },
-    { tier: '1', file: 'tier1_features.test.js' },
-    { tier: '2', file: 'tier2_boundary.test.js' },
-    { tier: '3', file: 'tier3_combinations.test.js' },
-    { tier: '4', file: 'tier4_scenarios.test.js' }
+    { tier: '1', file: 'plugin_creation_and_metadata.test.js' },
+    { tier: '1', file: 'app_update.test.js' },
+    { tier: '1', file: 'connected_folders_and_storage.test.js' }
   ];
 
   const targetFiles = suiteFiles.filter((s) => {

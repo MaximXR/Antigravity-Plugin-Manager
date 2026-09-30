@@ -77,6 +77,15 @@ function handleIncomingMessage(message) {
       }
       break;
 
+    case 'appUpdateAvailable':
+      if (message.update && message.update.hasUpdate) {
+        window.appUpdateData = message.update;
+        if (typeof showAppUpdateBanner === 'function') {
+          showAppUpdateBanner(message.update);
+        }
+      }
+      break;
+
     case 'updateProgress':
       appendUpdateLog(message.message);
       break;

@@ -26,8 +26,9 @@ echo   build.bat vsix      - Build IDE extension (vsix alias)
 echo   build.bat all       - Build both Extension and Desktop
 echo.
 echo Shortcuts:
+echo   build-all.bat       - Direct shortcut to build both (.vsix + Desktop unpacked)
 echo   build-ide.bat       - Direct shortcut for IDE extension build (.vsix)
-echo   build-desktop.bat   - Direct shortcut for Desktop build (.exe)
+echo   build-desktop.bat   - Direct shortcut for Desktop build (.exe / dist-win-unpacked)
 exit /b 1
 
 :BUILD_EXT
@@ -72,6 +73,11 @@ if %errorlevel% neq 0 (
 )
 cd /d "%~dp0"
 
+:: Sync unpacked desktop application directly to root dist-win-unpacked/ for instant 1-click execution
+echo.
+echo Syncing unpacked application to dist-win-unpacked\...
+node -e "const fs = require('fs'); const path = require('path'); const src = path.resolve('dist/win-unpacked'); const dest = path.resolve('dist-win-unpacked'); if (fs.existsSync(src)) { try { if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true }); } catch(_) {} fs.cpSync(src, dest, { recursive: true }); console.log('[SUCCESS] Ready-to-run Desktop app synced to dist-win-unpacked/'); }"
+
 :BUILD_FINISH
 echo.
 echo ==================================================
@@ -79,5 +85,7 @@ echo Build completed successfully!
 echo Artifacts ready in dist/:
 dir /b /o-d dist\*.vsix dist\*.exe dist\*.zip 2>nul
 echo.
-echo Local unpacked executable ready in: dist\win-unpacked\
+echo Ready-to-run unpacked Desktop application:
+echo   - dist-win-unpacked\AI Skill ^& Plugin Manager Desktop.exe
+echo   - dist\win-unpacked\AI Skill ^& Plugin Manager Desktop.exe
 echo ==================================================

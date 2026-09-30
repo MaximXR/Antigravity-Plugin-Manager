@@ -89,6 +89,24 @@
         </div>
       </div>
 
+      <!-- Desktop Application Update Banner -->
+      <div class="app-update-banner" id="app-update-banner" style="display: none;">
+        <div class="app-update-banner-left">
+          <span class="app-update-sparkle">🚀</span>
+          <span id="app-update-banner-text" class="app-update-banner-text">{{appUpdateAvailable}}</span>
+        </div>
+        <div class="app-update-banner-right">
+          <button class="btn btn-primary btn-sm" id="btn-app-update-download" onclick="downloadAppUpdate()">
+            <span id="btn-app-update-download-text">{{appUpdateDownload}}</span>
+            <span style="font-size: 10px;">↗</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-app-update-notes" onclick="openAppUpdateModal()">
+            <span>{{appUpdateWhatNew}}</span>
+          </button>
+          <button class="btn-banner-close" onclick="dismissAppUpdateBanner()" title="{{appUpdateDismiss}}">✕</button>
+        </div>
+      </div>
+
       <!-- Row 2: Unified Controls Row (Title on Left, Actions on Right) -->
       <div class="nav-controls-row">
         <div class="nav-controls-left">
@@ -185,19 +203,36 @@
 
         <div id="config-repos-body">
           <!-- Global Scope Block -->
-          <div class="config-scope-block">
+          <div class="config-scope-block config-scope-global">
           <div class="config-scope-header">
             <div class="config-scope-title">
               <span class="config-scope-badge config-badge-global">🌐</span>
               <span>{{storageScopeGlobal}}</span>
             </div>
             <div class="config-scope-actions">
-              <button class="btn btn-connect-action" id="btn-connect-plugins-global" title="{{btnConnectPluginsGlobal}}">
-                <span>+ 🔌 {{btnConnectPluginsGlobal}}</span>
-              </button>
-              <button class="btn btn-connect-action" id="btn-connect-skills-global" title="{{btnConnectSkillsGlobal}}">
-                <span>+ ⚡ {{btnConnectSkillsGlobal}}</span>
-              </button>
+              <div class="connect-dropdown-wrapper">
+                <button class="btn btn-connect-action btn-connect-global" id="btn-connect-menu-global" onclick="toggleConnectMenu('global', event)" title="{{btnConnectFolderGlobalTooltip}}">
+                  <span class="connect-btn-icon">🌐</span>
+                  <span>+ {{btnConnectFolderGlobal}}</span>
+                  <span class="connect-caret">▾</span>
+                </button>
+                <div class="connect-dropdown-menu" id="connect-menu-global" style="display: none;">
+                  <div class="connect-dropdown-item" onclick="triggerConnectFolder('plugins', 'global')">
+                    <span class="connect-item-icon">🔌</span>
+                    <div class="connect-item-text">
+                      <div class="connect-item-title">{{btnConnectPluginsGlobal}}</div>
+                      <div class="connect-item-desc">{{btnConnectPluginsDescGlobal}}</div>
+                    </div>
+                  </div>
+                  <div class="connect-dropdown-item" onclick="triggerConnectFolder('skills', 'global')">
+                    <span class="connect-item-icon">⚡</span>
+                    <div class="connect-item-text">
+                      <div class="connect-item-title">{{btnConnectSkillsGlobal}}</div>
+                      <div class="connect-item-desc">{{btnConnectSkillsDescGlobal}}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="config-subrows">
@@ -216,30 +251,48 @@
                 <button class="btn btn-secondary btn-chip" id="btn-open-skills-folder" title="~/.gemini/config/skills">📁 {{openSkillsFolderBtn}}</button>
               </div>
             </div>
-          </div>
-          <!-- Global Connected External Repositories -->
-          <div id="connected-repos-global-container" class="connected-repos-container" style="display: none;">
-            <div class="connected-repos-title">{{connectedRepositories}}</div>
-            <div id="connected-repos-global-chips" class="connected-repos-chips"></div>
+            <!-- Global Connected External Repositories (Inside subrows) -->
+            <div class="config-subrow config-subrow-connected" id="connected-repos-global-container" style="display: none;">
+              <span class="config-subrow-label">{{connectedRepositories}}</span>
+              <div id="connected-repos-global-chips" class="connected-repos-chips"></div>
+            </div>
           </div>
         </div>
 
         <!-- Project Workspace Scope Block -->
-        <div class="config-scope-block" id="workspace-scope-block" style="display: none;">
+        <div class="config-scope-block config-scope-workspace" id="workspace-scope-block" style="display: none;">
           <div class="config-scope-header">
             <div class="config-scope-title">
               <span class="config-scope-badge config-badge-workspace">📁</span>
               <span id="workspace-scope-title-label">{{storageScopeWorkspace}}</span>
+              <span id="workspace-scope-path" class="workspace-scope-path" style="display: none;" title="{{clickToOpenFolder}}" onclick="openProjectRootFolder()"></span>
               <select id="workspace-selector-select" class="workspace-scope-select" style="display: none;"></select>
               <span class="tab-help-icon" id="workspace-scope-help" style="cursor: help; display: none;" title="В мульти-проектах Antigravity IDE по умолчанию считывает контекст из первой (верхней) основной папки.">?</span>
             </div>
             <div class="config-scope-actions">
-              <button class="btn btn-connect-action" id="btn-connect-plugins-project" title="{{btnConnectPluginsProject}}">
-                <span>+ 🔌 {{btnConnectPluginsProject}}</span>
-              </button>
-              <button class="btn btn-connect-action" id="btn-connect-skills-project" title="{{btnConnectSkillsProject}}">
-                <span>+ ⚡ {{btnConnectSkillsProject}}</span>
-              </button>
+              <div class="connect-dropdown-wrapper">
+                <button class="btn btn-connect-action btn-connect-project" id="btn-connect-menu-project" onclick="toggleConnectMenu('project', event)" title="{{btnConnectFolderProjectTooltip}}">
+                  <span class="connect-btn-icon">📁</span>
+                  <span>+ {{btnConnectFolderProject}}</span>
+                  <span class="connect-caret">▾</span>
+                </button>
+                <div class="connect-dropdown-menu" id="connect-menu-project" style="display: none;">
+                  <div class="connect-dropdown-item" onclick="triggerConnectFolder('plugins', 'workspace')">
+                    <span class="connect-item-icon">🔌</span>
+                    <div class="connect-item-text">
+                      <div class="connect-item-title">{{btnConnectPluginsProject}}</div>
+                      <div class="connect-item-desc">{{btnConnectPluginsDescProject}}</div>
+                    </div>
+                  </div>
+                  <div class="connect-dropdown-item" onclick="triggerConnectFolder('skills', 'workspace')">
+                    <span class="connect-item-icon">⚡</span>
+                    <div class="connect-item-text">
+                      <div class="connect-item-title">{{btnConnectSkillsProject}}</div>
+                      <div class="connect-item-desc">{{btnConnectSkillsDescProject}}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="config-subrows">
@@ -253,7 +306,9 @@
             <div class="config-subrow">
               <span class="config-subrow-label">{{lblFolders}}</span>
               <div class="config-subrow-buttons">
+                <button class="btn btn-secondary btn-chip" id="btn-open-project-folder" onclick="openProjectRootFolder()" title="{{clickToOpenFolder}}">📁 {{openProjectRootFolderBtn}}</button>
                 <button class="btn btn-secondary btn-chip" id="btn-open-project-agents-folder" title="Workspace .agents folder">📁 {{openAgentsFolderBtn}}</button>
+                <button class="btn btn-secondary btn-chip" id="btn-remove-custom-workspace" style="display: none; color: #f87171; border-color: rgba(239, 68, 68, 0.35);" onclick="removeCurrentCustomFolder()" title="{{removeCustomFolderBtn}}">✕ {{removeCustomFolderBtn}}</button>
               </div>
             </div>
             <div class="config-subrow multi-root-target-row" id="multi-root-target-row" style="display: none;">
@@ -268,14 +323,14 @@
                 </select>
               </div>
             </div>
+            <!-- Workspace Connected External Repositories (Inside subrows) -->
+            <div class="config-subrow config-subrow-connected" id="connected-repos-workspace-container" style="display: none;">
+              <span class="config-subrow-label">{{connectedRepositories}}</span>
+              <div id="connected-repos-workspace-chips" class="connected-repos-chips"></div>
+            </div>
           </div>
           <div id="workspace-multi-hint" class="workspace-multi-hint" style="display: none;">
             💡 Antigravity IDE по умолчанию использует первую (верхнюю) папку как основную. Настройки будут применены к выбранному проекту.
-          </div>
-          <!-- Workspace Connected External Repositories -->
-          <div id="connected-repos-workspace-container" class="connected-repos-container" style="display: none;">
-            <div class="connected-repos-title">{{connectedRepositories}}</div>
-            <div id="connected-repos-workspace-chips" class="connected-repos-chips"></div>
           </div>
         </div>
         </div>
@@ -335,18 +390,32 @@
 
       <!-- Plugin Hero Card -->
       <div class="glass-card plugin-hero-card" id="plugin-hero-card">
+        <!-- Inline Error Banner -->
+        <div id="hero-inline-error" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #fca5a5;"></div>
+
         <div class="plugin-hero-top">
           <div class="plugin-hero-identity">
             <div class="plugin-hero-icon">🔌</div>
             <div class="plugin-hero-names">
-              <div class="plugin-hero-title-row">
-                <span class="plugin-hero-display-name" id="hero-display-name">...</span>
-                <button class="edit-icon-btn" onclick="editMetadata('displayName')" title="{{metadataDisplayName}}">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-                  </svg>
-                </button>
+              
+              <!-- Title Row -->
+              <div class="plugin-hero-title-row" id="hero-title-row">
+                <span id="hero-name-view" style="display: inline-flex; align-items: center; gap: 6px;">
+                  <span class="plugin-hero-display-name" id="hero-display-name">...</span>
+                  <button class="edit-icon-btn" onclick="startFieldEdit('displayName')" title="{{metadataDisplayName}}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                    </svg>
+                  </button>
+                </span>
+                <div class="inline-field-edit-box" id="hero-edit-box-displayName" style="display: none;">
+                  <input type="text" id="inline-edit-displayName" class="inline-edit-input inline-name-input" placeholder="{{metadataDisplayName}}">
+                  <button class="btn-inline-clear" title="{{btnClear}}" onclick="clearFieldInput('displayName', event)">⌫</button>
+                  <button class="btn-inline-apply" title="{{btnSave}} (Enter)" onclick="saveFieldEdit('displayName', event)">✓</button>
+                  <button class="btn-inline-cancel" title="{{btnCancel}} (Esc)" onclick="cancelFieldEdit('displayName', event)">↺</button>
+                </div>
+
                 <button class="copy-name-btn hero-copy-title-btn" id="hero-copy-title-btn" title="{{copyName}}">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -364,28 +433,87 @@
                 </span>
               </div>
               
-              <div class="plugin-hero-meta-row">
+              <!-- Meta Row -->
+              <div class="plugin-hero-meta-row" id="hero-meta-row">
                 <div id="hero-scope-badge"></div>
                 <div id="hero-status-badge"></div>
-                <span class="plugin-hero-ver-chip">
+
+                <!-- Version -->
+                <span class="plugin-hero-ver-chip" id="hero-ver-chip">
                   <span id="hero-version">v1.0.0</span>
-                  <button class="edit-icon-btn" onclick="editMetadata('version')" title="{{metadataVersion}}">
+                  <button class="edit-icon-btn" onclick="startFieldEdit('version')" title="{{metadataVersion}}">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                       <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
                     </svg>
                   </button>
                 </span>
+                <div class="inline-field-edit-box inline-chip-edit-box" id="hero-edit-box-version" style="display: none;">
+                  <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-left: 2px;">v</span>
+                  <input type="text" id="inline-edit-version" class="inline-edit-input inline-ver-input" placeholder="1.0.0">
+                  <button class="btn-inline-clear" title="{{btnClear}}" onclick="clearFieldInput('version', event)">⌫</button>
+                  <button class="btn-inline-apply" title="{{btnSave}} (Enter)" onclick="saveFieldEdit('version', event)">✓</button>
+                  <button class="btn-inline-cancel" title="{{btnCancel}} (Esc)" onclick="cancelFieldEdit('version', event)">↺</button>
+                </div>
+
+                <!-- Author -->
                 <span class="plugin-hero-author-chip" id="hero-author-container" style="display: none;">
                   <span id="hero-author"></span>
-                  <button class="edit-icon-btn" onclick="editMetadata('author')" title="{{metadataAuthor}}">
+                  <button class="edit-icon-btn" onclick="startFieldEdit('author')" title="{{metadataAuthor}}">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                       <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
                     </svg>
                   </button>
                 </span>
+                <button class="btn btn-secondary hero-add-chip-btn" id="hero-add-author-btn" onclick="startFieldEdit('author')" style="display: none; padding: 2px 7px; font-size: 10px; height: 20px; align-items: center; gap: 4px; border-radius: 999px; border-style: dashed; opacity: 0.85;" title="{{metadataAuthor}}">
+                  <span>{{addAuthor}}</span>
+                </button>
+                <div class="inline-field-edit-box inline-chip-edit-box" id="hero-edit-box-author" style="display: none;">
+                  <span style="font-size: 11px; margin-left: 2px;">👤</span>
+                  <input type="text" id="inline-edit-author" class="inline-edit-input inline-author-input" placeholder="{{metadataAuthor}}">
+                  <button class="btn-inline-clear" title="{{btnClear}}" onclick="clearFieldInput('author', event)">⌫</button>
+                  <button class="btn-inline-apply" title="{{btnSave}} (Enter)" onclick="saveFieldEdit('author', event)">✓</button>
+                  <button class="btn-inline-cancel" title="{{btnCancel}} (Esc)" onclick="cancelFieldEdit('author', event)">↺</button>
+                </div>
+
+                <!-- Repository -->
+                <span class="plugin-hero-repo-chip" id="hero-repo-container" style="display: none;">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                  </svg>
+                  <a id="hero-repo-link" href="#" target="_blank" onclick="openExternalUrl(this.href, event)" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                    <span id="hero-repo-link-text">GitHub</span>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="opacity: 0.85; flex-shrink: 0;">
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                      <polyline points="15 3 21 3 21 9"></polyline>
+                      <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                  </a>
+                  <button class="edit-icon-btn" onclick="startFieldEdit('repository')" title="{{labelRepository}}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                    </svg>
+                  </button>
+                </span>
+                <button class="btn btn-secondary hero-add-chip-btn" id="hero-add-repo-btn" onclick="startFieldEdit('repository')" style="display: none; padding: 2px 7px; font-size: 10px; height: 20px; align-items: center; gap: 4px; border-radius: 999px; border-style: dashed; opacity: 0.85;" title="{{labelRepository}}">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                  </svg>
+                  <span>{{addRepository}}</span>
+                </button>
+                <div class="inline-field-edit-box inline-chip-edit-box" id="hero-edit-box-repository" style="display: none;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 2px;">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                  </svg>
+                  <input type="text" id="inline-edit-repository" class="inline-edit-input inline-repo-input" placeholder="https://github.com/username/repo">
+                  <button class="btn-inline-clear" title="{{btnClear}}" onclick="clearFieldInput('repository', event)">⌫</button>
+                  <button class="btn-inline-apply" title="{{btnSave}} (Enter)" onclick="saveFieldEdit('repository', event)">✓</button>
+                  <button class="btn-inline-cancel" title="{{btnCancel}} (Esc)" onclick="cancelFieldEdit('repository', event)">↺</button>
+                </div>
               </div>
+
             </div>
           </div>
 
@@ -453,15 +581,33 @@
           </button>
         </div>
 
-        <!-- Description Box -->
-        <div class="plugin-hero-desc-box">
+        <!-- Description Box (View mode) -->
+        <div class="plugin-hero-desc-box" id="hero-desc-box-view">
           <div class="plugin-hero-desc-text" id="hero-description">...</div>
-          <button class="edit-icon-btn" onclick="editMetadata('description')" title="{{metadataDescription}}">
+          <button class="edit-icon-btn" onclick="startFieldEdit('description')" title="{{metadataDescription}}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
             </svg>
           </button>
+        </div>
+
+        <!-- Description Box (Edit mode) -->
+        <div class="inline-field-edit-box inline-desc-edit-box" id="hero-edit-box-description" style="display: none; width: 100%; flex-direction: column; gap: 6px; box-sizing: border-box;">
+          <textarea id="inline-edit-description" class="inline-desc-input" rows="3" placeholder="{{metadataDescription}}"></textarea>
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <button class="btn btn-secondary btn-inline-clear-lg" onclick="clearFieldInput('description', event)" title="{{btnClear}}">
+              <span>⌫ {{btnClear}}</span>
+            </button>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button class="btn btn-secondary btn-inline-cancel-lg" onclick="cancelFieldEdit('description', event)" title="{{btnCancel}} (Esc)">
+                <span>↺ {{btnCancel}}</span>
+              </button>
+              <button class="btn btn-inline-apply-lg" onclick="saveFieldEdit('description', event)" title="{{btnSave}} (Ctrl+Enter)">
+                <span>✓ {{btnSave}}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -571,6 +717,11 @@
           </div>
         </div>
 
+        <div id="plugin-repo-container" style="display: none; flex-direction: column; gap: 4px;">
+          <label class="storage-title">{{labelRepository}}</label>
+          <input type="text" id="create-repository" class="modal-form-input" placeholder="https://github.com/username/repository">
+        </div>
+
         <div id="skill-fields-container" style="display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <label class="switch">
@@ -610,6 +761,7 @@
         </div>
       </div>
     </div>
+
 
     <!-- AI Live Context Modal -->
     <div id="live-context-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
@@ -712,6 +864,51 @@
         <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-glass); background: rgba(0,0,0,0.15);">
           <button class="btn btn-secondary" onclick="closeMoveModal()">{{btnCancel}}</button>
           <button class="btn" id="btn-confirm-move" style="background: var(--primary-gradient); color: white;" onclick="submitMoveItem()">{{btnMove}}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop Application Update Details Modal -->
+    <div id="app-update-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-glass); border-radius: 12px; width: 100%; max-width: 540px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-glass);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">🚀</span>
+            <div>
+              <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #f1f5f9;" id="app-update-modal-title">{{appUpdateModalTitle}}</h3>
+              <p style="margin: 0; font-size: 11px; color: var(--text-muted);" id="app-update-modal-subtitle">{{appUpdateModalDesc}}</p>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; height: 24px;" onclick="closeAppUpdateModal()">✕</button>
+        </div>
+        <div id="app-update-modal-body" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
+          <!-- Versions diff -->
+          <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid var(--border-glass); border-radius: 8px; padding: 10px 14px;">
+            <div>
+              <div style="font-size: 11px; color: var(--text-muted);">{{currentVersion}}</div>
+              <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;" id="app-update-current-ver">—</div>
+            </div>
+            <div style="font-size: 18px; color: var(--text-muted);">➔</div>
+            <div>
+              <div style="font-size: 11px; color: var(--text-muted);">{{newVersion}}</div>
+              <div style="font-size: 14px; font-weight: 700; color: #34d399;" id="app-update-new-ver">—</div>
+            </div>
+          </div>
+          <!-- Release notes container -->
+          <div>
+            <div style="font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 6px;">{{appUpdateReleaseNotes}}</div>
+            <div id="app-update-notes-body" style="background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px; font-family: var(--font-mono, monospace); font-size: 11px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4; color: #94a3b8;"></div>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border-glass); background: rgba(0,0,0,0.15);">
+          <button class="btn btn-secondary" onclick="openAppUpdateReleasePage()" style="font-size: 11px; display: inline-flex; align-items: center; gap: 4px;">
+            <span>{{appUpdateOpenRelease}}</span>
+            <span>↗</span>
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="closeAppUpdateModal()">{{btnCancel}}</button>
+            <button class="btn" id="btn-app-update-modal-download" style="background: var(--primary-gradient); color: white;" onclick="downloadAppUpdate()">{{appUpdateDownload}}</button>
+          </div>
         </div>
       </div>
     </div>

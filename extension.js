@@ -22,6 +22,7 @@ const {
   getWorkspaceSkillConfigPath,
   resolveJsonConfigPath,
   readJsonConfigFile,
+  replaceEntryInJsonConfig,
   touchAntigravityConfigs,
   ensureDefaultPluginsFolderInGlobalConfig,
   isNameExcludedInJsonConfig,
@@ -69,7 +70,8 @@ const {
   deleteItem,
   resolveConflict,
   migrateStorage,
-  moveItem
+  moveItem,
+  savePluginMetadata
 } = require('./services/actions');
 const {
   parsePluginRepo,
@@ -1075,6 +1077,31 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         }
         break;
 
+      case 'replaceConnectedFolder':
+        try {
+          const { sourceFile, oldPath, workspaceRoot } = message;
+          if (!sourceFile || !oldPath) break;
+          const uris = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: lang === 'ru' ? 'Выбрать эту папку' : 'Select this folder',
+            title: lang === 'ru' ? 'Выберите новую папку для замены' : 'Select replacement folder'
+          });
+          if (uris && uris.length > 0) {
+            const newFolder = uris[0].fsPath;
+            replaceEntryInJsonConfig(sourceFile, oldPath, newFolder, workspaceRoot);
+            await triggerIdeScannerFlush(vscode.workspace.workspaceFolders);
+            vscode.window.showInformationMessage(
+              lang === 'ru' ? 'Путь к папке успешно обновлен.' : 'Folder path successfully updated.'
+            );
+            await notifyAndUpdate();
+          }
+        } catch (err) {
+          vscode.window.showErrorMessage('Failed to replace folder: ' + err.message);
+        }
+        break;
+
       case 'openConfigJson':
         try {
           const cfgPath = getAntigravityConfigPath();
@@ -1346,25 +1373,32 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         break;
 
       case 'openStorage':
-        if (fs.existsSync(storagePath)) await revealOrOpenFolder(storagePath);
-        else vscode.window.showWarningMessage('Storage folder does not exist yet.');
+        if (!fs.existsSync(storagePath)) fs.mkdirSync(storagePath, { recursive: true });
+        await revealOrOpenFolder(storagePath);
         break;
 
       case 'openActive':
-        if (fs.existsSync(activePluginsPath)) await revealOrOpenFolder(activePluginsPath);
-        else vscode.window.showWarningMessage('Active plugins folder does not exist.');
+      case 'openActiveFolder':
+      case 'openActivePluginsFolder':
+        if (!fs.existsSync(activePluginsPath)) fs.mkdirSync(activePluginsPath, { recursive: true });
+        await revealOrOpenFolder(activePluginsPath);
         break;
 
       case 'openActiveSkills':
-        if (fs.existsSync(activeSkillsPath)) await revealOrOpenFolder(activeSkillsPath);
-        else vscode.window.showWarningMessage('Active skills folder does not exist: ' + activeSkillsPath);
+      case 'openActiveSkillsFolder':
+        if (!fs.existsSync(activeSkillsPath)) fs.mkdirSync(activeSkillsPath, { recursive: true });
+        await revealOrOpenFolder(activeSkillsPath);
         break;
 
       case 'openFolder':
         if (message.path && fs.existsSync(message.path)) {
           await revealOrOpenFolder(message.path);
         } else {
-          vscode.window.showWarningMessage('Folder does not exist: ' + (message.path || ''));
+          vscode.window.showWarningMessage(
+            lang === 'ru'
+              ? `Папка не существует на диске: ${message.path || ''}`
+              : `Folder does not exist on disk: ${message.path || ''}`
+          );
         }
         break;
 
@@ -1439,10 +1473,20 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         }
         break;
 
+      case 'savePluginMetadata':
+        try {
+          const pluginDir = message.physicalPath || (message.isEnabled ? path.join(activePluginsPath, message.id) : path.join(storagePluginsPath, message.id));
+          await savePluginMetadata(pluginDir, message.metadata || {}, lang);
+          await notifyAndUpdate();
+        } catch (e) {
+          vscode.window.showErrorMessage('Failed to save plugin metadata: ' + e.message);
+        }
+        break;
+
       case 'editPluginMetadata':
         try {
-          let pluginFolder = message.isEnabled ? path.join(activePluginsPath, message.id) : path.join(storagePluginsPath, message.id);
-          if (!message.isEnabled && !fs.existsSync(pluginFolder)) {
+          let pluginFolder = message.physicalPath || (message.isEnabled ? path.join(activePluginsPath, message.id) : path.join(storagePluginsPath, message.id));
+          if (!message.physicalPath && !message.isEnabled && !fs.existsSync(pluginFolder)) {
             const rootPath = path.join(storagePath, message.id);
             if (fs.existsSync(rootPath)) pluginFolder = rootPath;
           }
@@ -1452,9 +1496,10 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
           else if (message.field === 'description') displayField = getTranslation('metadataDescription', lang);
           else if (message.field === 'version') displayField = getTranslation('metadataVersion', lang);
           else if (message.field === 'author') displayField = getTranslation('metadataAuthor', lang);
+          else if (message.field === 'repository') displayField = getTranslation('labelRepository', lang);
 
           const promptText = getTranslation('editMetadataPrompt', lang).replace('{field}', displayField);
-          const newValue = await vscode.window.showInputBox({ prompt: promptText, value: message.currentValue || '' });
+          const newValue = await vscode.window.showInputBox({ prompt: promptText, value: message.value || message.currentValue || '' });
           if (newValue !== undefined) {
             writePluginMetaField(pluginFolder, message.field, newValue);
             await notifyAndUpdate();
@@ -1561,6 +1606,24 @@ function setupWebviewMessagingShared(webview, context, statusBarItem, onUpdate) 
         }
         break;
       }
+
+      case 'savePluginMetadata':
+        try {
+          const pluginDir = message.physicalPath || (message.id ? path.join(activePluginsPath, message.id) : '');
+          if (pluginDir) {
+            await savePluginMetadata(pluginDir, message.metadata || {}, lang);
+            await notifyAndUpdate();
+          }
+        } catch (err) {
+          vscode.window.showErrorMessage(`Failed to save plugin metadata: ${err.message}`);
+        }
+        break;
+
+      case 'openExternalUrl':
+        if (message.url) {
+          vscode.env.openExternal(vscode.Uri.parse(message.url));
+        }
+        break;
     }
   });
 }

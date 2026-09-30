@@ -58,6 +58,13 @@ let tray = null;
 let isQuitting = false;
 let activeLanguage = loadActiveLanguage();
 
+let appVersion = '1.2.22';
+try {
+  const pkg = require('./package.json');
+  if (pkg && pkg.version) appVersion = pkg.version;
+} catch (_) {}
+let appUpdateState = null;
+
 let currentProjectId = null;
 let workspaceRoots = [];
 
@@ -119,16 +126,26 @@ function saveSavedProjectSelection(projectId) {
 }
 
 function initDesktopWorkspace() {
-  // 1. Check CLI arguments for a directory path
+  // 1. Check CLI arguments for an explicit user directory path
   const args = process.argv.slice(1);
+  const appRoot = path.resolve(__dirname, '..');
+  const desktopRoot = path.resolve(__dirname);
+
   for (const arg of args) {
-    if (arg && !arg.startsWith('-') && !arg.includes('node_modules') && !arg.endsWith('.js') && fs.existsSync(arg)) {
+    const trimmed = (arg || '').trim();
+    if (!trimmed || trimmed.startsWith('-') || trimmed === '.' || trimmed === '..' || trimmed.includes('node_modules') || trimmed.endsWith('.js')) {
+      continue;
+    }
+    const abs = path.resolve(trimmed);
+    if (abs === desktopRoot || abs === appRoot) {
+      continue;
+    }
+    if (fs.existsSync(abs)) {
       try {
-        if (fs.statSync(arg).isDirectory()) {
-          const norm = path.normalize(arg);
-          projectsService.addCustomFolder(norm);
-          currentProjectId = 'custom:' + norm.toLowerCase();
-          workspaceRoots = [norm];
+        if (fs.statSync(abs).isDirectory()) {
+          projectsService.addCustomFolder(abs);
+          currentProjectId = 'custom:' + abs.toLowerCase();
+          workspaceRoots = [abs];
           saveWorkspaceRoots(workspaceRoots);
           saveSavedProjectSelection(currentProjectId);
           return;
@@ -146,19 +163,26 @@ function initDesktopWorkspace() {
       return;
     }
     if (savedProjId.startsWith('custom:')) {
-      const targetPath = savedProjId.replace('custom:', '');
-      if (fs.existsSync(targetPath)) {
-        currentProjectId = savedProjId;
-        workspaceRoots = [targetPath];
+      const targetPath = savedProjId.replace('custom:', '').trim();
+      if (targetPath && targetPath !== '.' && targetPath !== '..' && path.isAbsolute(targetPath) && fs.existsSync(targetPath)) {
+        const abs = path.resolve(targetPath);
+        currentProjectId = 'custom:' + abs.toLowerCase();
+        workspaceRoots = [abs];
+        return;
+      } else {
+        // Clear corrupted / dot custom selection
+        saveSavedProjectSelection(null);
+        currentProjectId = null;
+        workspaceRoots = [];
+      }
+    } else {
+      const pData = projectsService.getAntigravityProjects();
+      const match = pData.projects.find((p) => p.id === savedProjId);
+      if (match && match.folders && match.folders.length > 0) {
+        currentProjectId = match.id;
+        workspaceRoots = match.folders.map((f) => f.fsPath);
         return;
       }
-    }
-    const pData = projectsService.getAntigravityProjects();
-    const match = pData.projects.find((p) => p.id === savedProjId);
-    if (match && match.folders && match.folders.length > 0) {
-      currentProjectId = match.id;
-      workspaceRoots = match.folders.map((f) => f.fsPath);
-      return;
     }
   }
 
@@ -256,10 +280,13 @@ function collectAllData(roots = workspaceRoots) {
   const storagePath = fsUtils.getDefaultStoragePath();
 
   const workspaceFolders = (roots || []).map((r) => {
-    const fsPath = typeof r === 'string' ? r : (r.fsPath || (r.uri ? r.uri.fsPath : ''));
-    const name = typeof r === 'string' ? path.basename(r) : (r.name || path.basename(fsPath));
+    let fsPath = typeof r === 'string' ? r : (r.fsPath || (r.uri ? r.uri.fsPath : ''));
+    if (fsPath && !path.isAbsolute(fsPath)) {
+      fsPath = path.resolve(fsPath);
+    }
+    const name = typeof r === 'string' ? (path.basename(fsPath) || fsPath) : (r.name || path.basename(fsPath));
     return { name, fsPath };
-  });
+  }).filter((w) => w.fsPath && w.fsPath !== '.' && w.fsPath !== '..' && fs.existsSync(w.fsPath));
 
   const validRoots = workspaceFolders.map((w) => w.fsPath).filter(Boolean);
 
@@ -416,12 +443,24 @@ async function openPathInExplorer(targetPath) {
         await shell.openPath(targetPath);
       }
     } else {
-      spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' });
+      if (mainWindow) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: activeLang === 'ru' ? 'Папка не найдена' : 'Folder Not Found',
+          message: activeLang === 'ru'
+            ? `Папка не существует на диске:\n${targetPath}`
+            : `Folder does not exist on disk:\n${targetPath}`
+        });
+      }
     }
   } catch (e) {
-    try {
-      spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' });
-    } catch (_) {}
+    if (mainWindow) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Error',
+        message: e.message
+      });
+    }
   }
 }
 
@@ -523,6 +562,134 @@ function createMainWindow() {
 }
 
 /**
+ * Builds the context menu for system tray
+ */
+function buildTrayMenu() {
+  const isRu = activeLanguage === 'ru';
+  const menuItems = [];
+
+  if (appUpdateState && appUpdateState.hasUpdate) {
+    menuItems.push({
+      label: `✨ ${isRu ? 'Доступно обновление' : 'Update available'}: v${appUpdateState.remoteVersion}`,
+      click: () => {
+        if (appUpdateState.downloadUrl || appUpdateState.releaseUrl) {
+          shell.openExternal(appUpdateState.downloadUrl || appUpdateState.releaseUrl);
+        }
+      }
+    });
+    menuItems.push({ type: 'separator' });
+  }
+
+  menuItems.push({
+    label: isRu ? 'Показать окно' : 'Show Window',
+    click: () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      } else {
+        createMainWindow();
+      }
+    }
+  });
+
+  menuItems.push({
+    label: isRu ? 'Обновить данные' : 'Refresh Data',
+    click: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const data = collectAllData(workspaceRoots);
+        mainWindow.webContents.send('from-backend', data);
+      }
+    }
+  });
+
+  menuItems.push({
+    label: isRu ? 'Проверить обновления приложения...' : 'Check for app updates...',
+    click: async () => {
+      await checkForDesktopAppUpdates(true);
+    }
+  });
+
+  menuItems.push({ type: 'separator' });
+  menuItems.push({
+    label: isRu ? 'Выход' : 'Exit',
+    click: () => {
+      isQuitting = true;
+      app.quit();
+    }
+  });
+
+  return Menu.buildFromTemplate(menuItems);
+}
+
+function updateTrayMenu() {
+  if (tray && !tray.isDestroyed()) {
+    tray.setContextMenu(buildTrayMenu());
+  }
+}
+
+/**
+ * Checks for a new version of the Desktop app on GitHub.
+ * If isManual is true, displays user dialogs.
+ */
+async function checkForDesktopAppUpdates(isManual = false) {
+  try {
+    fsUtils.logDebug(`[APP UPDATE] Checking updates (current: v${appVersion}, manual: ${isManual})...`);
+    const res = await updater.checkAppUpdate(appVersion);
+    if (res && res.hasUpdate) {
+      appUpdateState = res;
+      updateTrayMenu();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('from-backend', {
+          command: 'appUpdateAvailable',
+          update: res
+        });
+      }
+      if (isManual && mainWindow && !mainWindow.isDestroyed()) {
+        const isRu = activeLanguage === 'ru';
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: isRu ? 'Обновление приложения' : 'Application Update',
+          message: isRu
+            ? `Доступна новая версия AI Skill & Plugin Manager Desktop v${res.remoteVersion}!\n\nСкачать обновление сейчас?`
+            : `A new version of AI Skill & Plugin Manager Desktop v${res.remoteVersion} is available!\n\nDownload update now?`,
+          buttons: [isRu ? 'Скачать' : 'Download', isRu ? 'Позже' : 'Later'],
+          defaultId: 0
+        }).then(({ response }) => {
+          if (response === 0) {
+            shell.openExternal(res.downloadUrl || res.releaseUrl);
+          }
+        });
+      }
+    } else if (isManual && mainWindow && !mainWindow.isDestroyed()) {
+      const isRu = activeLanguage === 'ru';
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: isRu ? 'Обновление приложения' : 'Application Update',
+        message: isRu
+          ? `У вас установлена самая актуальная версия v${appVersion}.`
+          : `You are using the latest version v${appVersion}.`,
+        buttons: ['OK']
+      });
+    }
+    return res;
+  } catch (e) {
+    fsUtils.logDebug(`[APP UPDATE] Check error: ${e.message}`);
+    if (isManual && mainWindow && !mainWindow.isDestroyed()) {
+      const isRu = activeLanguage === 'ru';
+      dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: isRu ? 'Проверка обновлений' : 'Check for Updates',
+        message: isRu
+          ? `Не удалось проверить обновления: ${e.message}`
+          : `Failed to check for updates: ${e.message}`,
+        buttons: ['OK']
+      });
+    }
+    return null;
+  }
+}
+
+/**
  * Initialize system tray icon with context menu
  */
 function createTray() {
@@ -531,39 +698,8 @@ function createTray() {
 
   try {
     tray = new Tray(iconPath);
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Показать окно',
-        click: () => {
-          if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-          } else {
-            createMainWindow();
-          }
-        }
-      },
-      {
-        label: 'Обновить данные',
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            const data = collectAllData(workspaceRoots);
-            mainWindow.webContents.send('from-backend', data);
-          }
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Выход',
-        click: () => {
-          isQuitting = true;
-          app.quit();
-        }
-      }
-    ]);
-
     tray.setToolTip('AI Skill & Plugin Manager Desktop');
-    tray.setContextMenu(contextMenu);
+    tray.setContextMenu(buildTrayMenu());
 
     tray.on('click', () => {
       if (mainWindow) {
@@ -670,6 +806,10 @@ if (isSmokeTest) {
       createMainWindow();
       createTray();
 
+      setTimeout(async () => {
+        await checkForDesktopAppUpdates(false);
+      }, 3500);
+
       app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
           createMainWindow();
@@ -736,13 +876,22 @@ ipcMain.on('to-backend', async (event, message) => {
           vscodeShim._setState({ workspaceFolders: [] });
         } else if (pId.startsWith('custom:')) {
           // Custom user folder
-          currentProjectId = pId;
-          const targetPath = pId.replace('custom:', '');
-          if (fs.existsSync(targetPath)) {
-            workspaceRoots = [targetPath];
+          const targetPath = pId.replace('custom:', '').trim();
+          if (targetPath && targetPath !== '.' && targetPath !== '..' && path.isAbsolute(targetPath) && fs.existsSync(targetPath)) {
+            const abs = path.resolve(targetPath);
+            currentProjectId = 'custom:' + abs.toLowerCase();
+            workspaceRoots = [abs];
             saveWorkspaceRoots(workspaceRoots);
             saveSavedProjectSelection(currentProjectId);
             vscodeShim._setState({ workspaceFolders: workspaceRoots });
+          } else {
+            // Stale or invalid custom folder: purge and reset to global
+            projectsService.removeCustomFolder(targetPath);
+            currentProjectId = null;
+            workspaceRoots = [];
+            saveWorkspaceRoots([]);
+            saveSavedProjectSelection(null);
+            vscodeShim._setState({ workspaceFolders: [] });
           }
         } else {
           // Standard Antigravity project
@@ -1014,8 +1163,7 @@ ipcMain.on('to-backend', async (event, message) => {
         break;
       }
 
-      case 'disconnectFolder':
-      case 'removeCustomFolder': {
+      case 'disconnectFolder': {
         const configuredPath = message.configuredPath || message.folderPath || message.path || '';
         let sourceFile = message.sourceFile;
         if (!sourceFile) {
@@ -1033,6 +1181,46 @@ ipcMain.on('to-backend', async (event, message) => {
         if (sourceFile && configuredPath) {
           fsUtils.removeEntryFromJsonConfig(sourceFile, configuredPath);
           await fsUtils.triggerIdeScannerFlush(workspaceRoots);
+        }
+        const data = collectAllData(workspaceRoots);
+        event.sender.send('from-backend', data);
+        break;
+      }
+
+      case 'removeCustomWorkspaceFolder':
+      case 'removeCustomFolder': {
+        const folderToRemove = message.folderPath || message.path || (message.projectId && message.projectId.startsWith('custom:') ? message.projectId.replace('custom:', '') : '');
+        if (folderToRemove) {
+          projectsService.removeCustomFolder(folderToRemove);
+          const normToRemove = path.resolve(folderToRemove).toLowerCase();
+          const currentNorm = currentProjectId && currentProjectId.startsWith('custom:')
+            ? path.resolve(currentProjectId.replace('custom:', '')).toLowerCase()
+            : null;
+          if (currentNorm === normToRemove) {
+            currentProjectId = null;
+            workspaceRoots = [];
+            saveWorkspaceRoots([]);
+            saveSavedProjectSelection(null);
+            vscodeShim._setState({ workspaceFolders: [] });
+          }
+        }
+        const data = collectAllData(workspaceRoots);
+        event.sender.send('from-backend', data);
+        break;
+      }
+
+      case 'replaceConnectedFolder': {
+        const { sourceFile, oldPath, workspaceRoot } = message;
+        if (sourceFile && oldPath && mainWindow) {
+          const res = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory'],
+            title: activeLang === 'ru' ? 'Выберите новую папку для замены' : 'Select replacement folder'
+          });
+          if (!res.canceled && res.filePaths && res.filePaths[0]) {
+            const newFolder = res.filePaths[0];
+            fsUtils.replaceEntryInJsonConfig(sourceFile, oldPath, newFolder, workspaceRoot);
+            await fsUtils.triggerIdeScannerFlush(workspaceRoots);
+          }
         }
         const data = collectAllData(workspaceRoots);
         event.sender.send('from-backend', data);
@@ -1199,8 +1387,21 @@ ipcMain.on('to-backend', async (event, message) => {
         break;
       }
 
+      case 'savePluginMetadata': {
+        const pluginDir = message.physicalPath || (message.id ? path.join(fsUtils.getActivePluginsPath(), message.id) : '');
+        if (pluginDir) {
+          await actions.savePluginMetadata(pluginDir, message.metadata || {}, activeLanguage);
+          await fsUtils.triggerIdeScannerFlush(workspaceRoots);
+        }
+        const data = collectAllData(workspaceRoots);
+        event.sender.send('from-backend', data);
+        break;
+      }
+
       case 'editPluginMetadata': {
-        fsUtils.writePluginMetaField(message.physicalPath || message.id, message.field, message.currentValue);
+        const val = message.value !== undefined ? message.value : message.currentValue;
+        fsUtils.writePluginMetaField(message.physicalPath || message.id, message.field, val);
+        await fsUtils.triggerIdeScannerFlush(workspaceRoots);
         const data = collectAllData(workspaceRoots);
         event.sender.send('from-backend', data);
         break;
@@ -1231,7 +1432,11 @@ ipcMain.on('to-backend', async (event, message) => {
       case 'checkUpdates': {
         const data = collectAllData(workspaceRoots);
         try {
-          const updates = await updater.checkAllUpdates(data.plugins, activeLanguage);
+          // Check plugin updates and desktop app updates concurrently
+          const [updates] = await Promise.all([
+            updater.checkAllUpdates(data.plugins, activeLanguage),
+            checkForDesktopAppUpdates(false)
+          ]);
           event.sender.send('from-backend', {
             command: 'updatesChecked',
             results: updates,
@@ -1243,6 +1448,24 @@ ipcMain.on('to-backend', async (event, message) => {
             message: `Update check failed: ${e.message}`,
             level: 'error'
           });
+        }
+        break;
+      }
+
+      case 'checkAppUpdate': {
+        const appUp = await checkForDesktopAppUpdates(true);
+        if (appUp && appUp.hasUpdate) {
+          event.sender.send('from-backend', {
+            command: 'appUpdateAvailable',
+            update: appUp
+          });
+        }
+        break;
+      }
+
+      case 'openExternalUrl': {
+        if (message.url) {
+          shell.openExternal(message.url);
         }
         break;
       }
@@ -1333,19 +1556,27 @@ ipcMain.on('to-backend', async (event, message) => {
         break;
       }
 
-      case 'openActiveFolder': {
-        const p = message.type === 'skills' ? fsUtils.getActiveSkillsPath() : fsUtils.getActivePluginsPath();
+      case 'openActive':
+      case 'openActiveFolder':
+      case 'openActivePluginsFolder': {
+        const p = fsUtils.getActivePluginsPath();
+        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
         await openPathInExplorer(p);
         break;
       }
 
-      case 'openActivePluginsFolder': {
-        await openPathInExplorer(fsUtils.getActivePluginsPath());
+      case 'openActiveSkills':
+      case 'openActiveSkillsFolder': {
+        const p = fsUtils.getActiveSkillsPath();
+        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+        await openPathInExplorer(p);
         break;
       }
 
-      case 'openActiveSkillsFolder': {
-        await openPathInExplorer(fsUtils.getActiveSkillsPath());
+      case 'openStorage': {
+        const p = fsUtils.getDefaultStoragePath();
+        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+        await openPathInExplorer(p);
         break;
       }
 
@@ -1392,7 +1623,16 @@ ipcMain.on('to-backend', async (event, message) => {
       case 'openProjectAgentsFolder': {
         const root = message.workspaceRoot || (workspaceRoots.length > 0 ? workspaceRoots[0] : null);
         if (root) {
-          await openPathInExplorer(path.join(root, '.agents'));
+          const p = path.join(root, '.agents');
+          if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+          await openPathInExplorer(p);
+        }
+        break;
+      }
+
+      case 'openExternalUrl': {
+        if (message.url) {
+          shell.openExternal(message.url);
         }
         break;
       }

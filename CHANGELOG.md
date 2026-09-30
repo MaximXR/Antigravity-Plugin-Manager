@@ -1,5 +1,205 @@
 # История изменений / Changelog
 
+## 1.2.27
+
+### Русский
+* **Устранение поврежденных путей рабочих областей и защита от `.` (Broken Custom Folder Purge & Guard):**
+  - Устранена причина появления точки `.` в списке пользовательских папок, возникавшая из-за передачи относительного аргумента `.` при запуске приложения через `electron .` или `start.bat`.
+  - В `projectsService.getCustomFolders()` и `addCustomFolder()` внедрена строгая валидация и автоматическая очистка: записи с `.`, `..`, относительными путями или несуществующими папками немедленно удаляются из `antigravity_desktop_custom_folders.json`.
+  - При запуске с поврежденным сохраненным идентификатором проекта (`custom:.`) состояние сбрасывается в безопасный глобальный контекст.
+* **Прозрачность путей проектов в интерфейсе (Path Transparency):**
+  - В выпадающем списке проектов рядом с названием пользовательской папки теперь отображается ее физический путь `📁 <Имя> (<Полный путь>)`, а также всплывающая подсказка с путем для любого выбранного проекта.
+  - В блоке «Рабочая область» добавлен интерактивный кликабельный чип с полным путем `.workspace-scope-path`, позволяющий в 1 клик открыть папку проекта в Проводнике Windows.
+* **Быстрые действия с папками проекта (Project Actions & Custom Folder Removal):**
+  - В строку «ПАПКИ» блока рабочей области добавлена кнопка `[📁 Папка проекта]`, открывающая корневой каталог проекта в файловом менеджере ОС.
+  - Для пользовательских рабочих папок добавлена кнопка удаления `[✕ Убрать из списка]` в блоке рабочей области, а также пункт `✕ Убрать текущую папку из списка...` в выпадающем меню выбора проектов, позволяющий удалить папку из реестра с подтверждением.
+* **Наглядное разделение кнопок подключения папок (Differentiated Scope Connect Buttons):**
+  - Полностью разделены кнопки подключения внешних библиотек: кнопка глобального уровня оформлена в синей теме с иконкой `🌐 + Подключить глобально ▾`, а кнопка проекта — в изумрудной теме с иконкой `📁 + Подключить к проекту ▾`.
+  - Сами блоки хранилищ получили акцентные цветные левые полосы (синяя для глобального и изумрудная для проекта), создавая гармоничную цветовую связь между бейджем, заголовком, кнопкой выпадающего меню и чипами подключенных папок.
+  - Пункты выпадающих списков снабжены явными пояснениями целевых файлов конфигураций (`~/.gemini/config/...` для глобального и `.agents/...` для проекта).
+
+### English
+* **Broken Workspace Folder Elimination & Dot Guard (Broken Custom Folder Purge & Guard):**
+  - Fixed root cause where single dot `.` was treated as a workspace folder due to `process.argv` during `electron .` or `start.bat` launch.
+  - Implemented strict path validation and automatic purging in `projectsService.getCustomFolders()` and `addCustomFolder()`: any entry with `.`, `..`, relative, or non-existent path is automatically sanitized and removed from `antigravity_desktop_custom_folders.json`.
+  - Corrupted saved project preferences (e.g. `custom:.`) are automatically reset to safe global context.
+* **Project Path Transparency in Webview:**
+  - The project selector dropdown now explicitly shows full physical paths for custom folders: `📁 <Name> (<FullPath>)`, plus detailed tooltip titles.
+  - Added interactive clickable `.workspace-scope-path` chip in the Workspace block displaying the active workspace path and opening it in Explorer on click.
+* **Direct Project Folder & Custom Folder Removal Actions:**
+  - Added `[📁 Project Folder]` button under the FOLDERS subrow to reveal the workspace root directly in File Explorer.
+  - Added `[✕ Remove from List]` action button in the Workspace block and `✕ Remove current folder from list...` option in the project dropdown to safely remove unwanted custom folders with a confirmation dialog.
+* **Differentiated Scope Connect Buttons & Visual Color Accents:**
+  - Completely separated connect actions by scope: the global button is styled with blue accent `🌐 + Connect Globally ▾`, while the project button is styled with emerald accent `📁 + Connect to Project ▾`.
+  - Scope containers now feature colored left indicator bars (blue for Global and emerald for Workspace), clearly associating badges, titles, connect buttons, and connected repository chips.
+  - Dropdown options explicitly clarify the target config files (`~/.gemini/config/...` for global and `.agents/...` for workspace).
+
+## 1.2.26
+
+### Русский
+* **Исправление критической ошибки при отключении подключенной папки (Safe Disconnect Fix):**
+  - Устранена критическая ошибка в `fsUtils.removeEntryFromJsonConfig`, из-за которой при отключении одной внешней папки ошибочно удалялись все остальные подключенные библиотеки, имевшие схожее базовое имя каталога (`path.basename`, например `skills` или `plugins`).
+  - Сопоставление теперь производится строго по исходному, нормализованному и абсолютно разрешенному пути, сохраняя все остальные записи нетронутыми.
+* **Гарантированное открытие системных папок и папок плагинов/навыков:**
+  - В Desktop-версию (`desktop/main.js`) добавлены отсутствовавшие обработчики команд IPC `openActive`, `openActiveSkills` и `openStorage`.
+  - Перед открытием каталогов в проводнике операционной системы теперь выполняется рекурсивное создание папки (`fs.mkdirSync(p, { recursive: true })`), исключая зависания или сбои при первом обращении к новым хранилищам.
+  - В `openPathInExplorer` добавлено наглядное информационное предупреждение при попытке открытия физически отсутствующего пути.
+* **Обнаружение и восстановление отсутствующих подключенных папок (Missing Folder Detection & Replace):**
+  - При отсутствии физического каталога на диске чип подключенной папки подсвечивается предупреждающим стилем (`⚠️ Не найдена`).
+  - Добавлена кнопка быстрой замены пути `[↺ Заменить...]`, вызывающая нативный диалог выбора папки в OS (`replaceConnectedFolder`) и атомарно обновляющая путь в конфигурационном файле (`fsUtils.replaceEntryInJsonConfig`).
+  - Кнопка отключения `[×]` безопасно удаляет только проблемную запись.
+* **Упрощение интерфейса подключения и визуальная группировка (Unified Connect & Subrows UX):**
+  - Устранено замешательство от двух конкурирующих кнопок (`+ Папка плагинов` и `+ Папка навыков`). В шапку каждого блока добавлена единая кнопка с выпадающим меню `[+ Подключить папку ▾]`.
+  - Подключенные папки перенесены внутрь блока `.config-subrows` как органичная подстрока `ПОДКЛЮЧЕННЫЕ ПАПКИ`.
+  - Устранена длинная оторванная разделительная черта, благодаря чему подключенные библиотеки однозначно и наглядно ассоциируются со своим уровнем (Глобальные или Проект).
+
+### English
+* **Critical Safe Disconnect Fix for Connected Folders:**
+  - Fixed a critical regression in `fsUtils.removeEntryFromJsonConfig` where disconnecting a single external folder inadvertently removed all other configured folders sharing the same directory basename (`path.basename`, e.g. `skills` or `plugins`).
+  - Folder matching is now strictly performed against raw, normalized, and resolved directory paths, leaving other configured folders intact.
+* **Guaranteed System & Active Folders Opening:**
+  - Added missing `openActive`, `openActiveSkills`, and `openStorage` IPC command handlers to Desktop app (`desktop/main.js`).
+  - Target system folders (`~/.gemini/config/plugins`, `skills`, `plugins_storage`, `.agents`) are now recursively created on disk (`fs.mkdirSync(p, { recursive: true })`) before opening in OS file explorer.
+  - Added clean visual error warnings in `openPathInExplorer` when attempting to open a non-existent directory.
+* **Missing Connected Folder Detection & Path Replacement:**
+  - Connected folders that no longer exist on disk are now clearly highlighted with warning styling (`⚠️ Not found`).
+  - Added quick `[↺ Change...]` action button (`replaceConnectedFolder`) allowing users to pick a replacement directory via native OS picker and update config files seamlessly (`fsUtils.replaceEntryInJsonConfig`).
+  - The disconnect button `[×]` safely purges only the missing entry without collateral deletions.
+* **Unified Connect Dropdown & Scope-Integrated Subrows UX:**
+  - Replaced the confusing side-by-side "+ Plugins" and "+ Skills" buttons with a single intuitive dropdown button: `[+ Connect Folder ▾]`.
+  - Moved connected folders inside the `.config-subrows` container as an integrated `CONNECTED FOLDERS` subrow.
+  - Removed detached full-width divider lines, establishing unmistakable visual ownership under either Global or Project scopes.
+
+## 1.2.25
+
+### Русский
+* **Исправление сохранения метаданных плагина (Metadata Save Interface Fix):**
+  - Устранена критическая ошибка с исчезновением заголовка и нарушением интерфейса при сохранении названия или метаданных плагина (`saveFieldEdit`). Функция `renderPluginDetailsView` теперь строго синхронизирует и восстанавливает видимость элементов заголовка (`#hero-name-view`), версии и описания.
+  - В расширение IDE (`extension.js`) добавлен недостающий обработчик команды IPC `savePluginMetadata`, выполняющий атомарную запись в `plugin.json` и сброс кэша сканеров.
+* **Очистка панели действий Hero Card:**
+  - Из верхней панели действий Hero-карточки удалена избыточная кнопка «Редактировать» (`#btn-hero-edit`), так как все метаданные теперь редактируются по месту кликом на само поле или иконку-карандаш.
+* **Интерактивные ссылки на GitHub и индикатор перехода во внешний браузер:**
+  - В чип репозитория в Hero-карточке добавлен символ/иконка внешнего перехода `↗`, интуитивно сообщающая пользователю об открытии браузера.
+  - Реализована безопасная кроссплатформенная команда IPC `openExternalUrl` (через `shell.openExternal` в Desktop и `vscode.env.openExternal` в IDE) для гарантированного открытия внешних ссылок без блокировок.
+* **Кнопка и чип перехода на GitHub во всех списках карточек (Global & Local Cards):**
+  - Во всех списках карточек (плагины, навыки, правила) добавлена иконка GitHub в верхний блок действий `card-actions-top` и кликабельный тег с `↗` в нижний блок `card-footer-tags`.
+  - Вложенные навыки и правила плагинов автоматически наследуют ссылку на репозиторий своего родительского плагина.
+  - Во вложенных списках внутри окна деталей плагина для каждого навыка, правила и воркфлоу также выведены кнопка и тег перехода на GitHub.
+* **Нижний ряд кнопок действий в карточках плагинов (Bottom Action Row for Plugin Cards):**
+  - В карточках плагинов основного списка добавлен нижний ряд кнопок действий (`card-bottom-actions`).
+  - Размещена удобная стилизованная кнопка «Открыть плагин» (`btn-card-open-plugin`) с акцентным градиентом.
+  - При наличии GitHub-репозитория выводится кнопка «Открыть GitHub» (`btn-card-github`) с иконкой и стрелкой перехода `↗`.
+  - Верхний правый блок `card-actions-top` очищен от дублирующих круглых кнопок, обеспечивая идеальную симметрию колонок.
+
+### English
+* **Plugin Metadata Save Interface Fix:**
+  - Resolved a critical bug where saving plugin metadata or display name caused the title to disappear and disrupted the interface. `renderPluginDetailsView` now strictly synchronizes and restores visibility of the title (`#hero-name-view`), version chip, and description box.
+  - Added missing `savePluginMetadata` IPC handler to IDE extension (`extension.js`) for atomic updates to `plugin.json` and scanner cache invalidation.
+* **Hero Card Actions Cleanup:**
+  - Removed the redundant "Редактировать" (Edit) button from the Hero card actions bar since all fields are now editable in-place.
+* **Interactive GitHub Links & External Navigation Indicator:**
+  - Added external navigation icon `↗` to GitHub repository chips to make external browser navigation immediately clear.
+  - Added safe cross-platform IPC command `openExternalUrl` (`shell.openExternal` in Desktop and `vscode.env.openExternal` in IDE) to open links reliably without popup blocking.
+* **GitHub Action Button & Tags Across All Resource Cards:**
+  - Added GitHub button to `card-actions-top` and clickable repo tag with `↗` to `card-footer-tags` across plugins, skills, and rules cards.
+  - Sub-skills and rules automatically inherit the GitHub repository URL from their parent plugin.
+  - Inside the plugin details view, each skill, rule, and workflow now includes direct GitHub navigation.
+* **Bottom Action Buttons Row for Plugin Cards:**
+  - Added dedicated bottom action row (`card-bottom-actions`) to plugin cards in the main plugins list.
+  - Prominently displays "Open Plugin" (`btn-card-open-plugin`) with accent gradient.
+  - Shows "Open GitHub" (`btn-card-github`) with external link indicator `↗` when a repository is configured.
+  - Cleared duplicate circular buttons from top-right actions for a perfectly balanced layout.
+
+## 1.2.24
+
+### Русский
+* **Исправление открытия карточки плагина из списка (Plugin Card Navigation Fix):**
+  - Устранена критическая ошибка рекурсивного зацикливания (`Maximum call stack size exceeded`) при переходе к деталям плагина из основного списка, вызванная преждевременным вызовом сброса редактирования до инициализации идентификатора активного плагина.
+  - В карточку плагина в списке добавлена прямая кнопка быстрого перехода к управлению (`Manage Plugin`) с безопасным экранированием идентификаторов.
+* **Интуитивные кнопки управления полями (Clear, Save, Undo):**
+  - Иконка отмены заменена с неоднозначного крестика на общепринятую стрелку отката `↺` («Отменить изменения без сохранения»), что полностью исключает путаницу с удалением/стиранием данных.
+  - Добавлена кнопка быстрой очистки поля `⌫` («Очистить»), позволяющая в 1 клик стереть текущее значение (название, длинный URL репозитория или описание) для ввода новых данных.
+  - Для поля описания в нижней панели аккуратно разнесены кнопка `⌫ Очистить` слева и кнопки `↺ Отмена (Esc)` / `✓ Сохранить (Ctrl+Enter)` справа.
+
+### English
+* **Plugin Details Navigation Fix:**
+  - Resolved a critical recursion loop (`Maximum call stack size exceeded`) that prevented opening plugin details from the main list.
+  - Added an explicit "Manage Plugin" action button to the plugin card header with safely escaped IDs.
+* **Intuitive Inline Action Controls (Clear, Save, Undo):**
+  - Replaced ambiguous `✕` with universal undo arrow `↺` ("Revert changes without saving") to eliminate confusion with deletion.
+  - Added dedicated clear button `⌫` ("Clear field") for one-click clearing of input values (ideal when entering new URLs or descriptions).
+  - Cleanly organized action layout for description textarea with `⌫ Clear` on the left and `↺ Cancel (Esc)` / `✓ Save (Ctrl+Enter)` on the right.
+
+## 1.2.23
+
+### Русский
+* **Поэлементное инлайн-редактирование плагинов по месту (Single-Field Hero Inline Edit):**
+  - Полностью исключено дублирующее всплывающее модальное окно `#edit-plugin-modal`: редактирование полей плагина происходит непосредственно по месту в Hero Card.
+  - Поля редактируются строго по одному — трансформируется только то поле, на иконку-карандаш или кнопку которого нажал пользователь (`displayName`, `version`, `author`, `repository` или `description`), остальные поля остаются в обычном режиме просмотра.
+  - Рядом с каждым редактируемым полем выведены четкие компактные кнопки быстрого применения `[✓]` и отмены `[✕]`.
+  - Реализовано авто-применение изменений при клике в свободное место (click-outside) без зависания открытого поля ввода.
+  - Поддержка горячих клавиш: `Enter` для сохранения, `Esc` для отмены, `Ctrl+Enter` в многострочном поле описания.
+
+### English
+* **Single-Field Hero In-Place Inline Editing:**
+  - Completely eliminated the redundant popup modal `#edit-plugin-modal`: plugin fields are edited directly in place inside the Hero Card.
+  - Single-field granularity: only the specific field clicked (Display Name, Version, Author, GitHub Repository, or Description) transforms into an edit box, keeping the rest of the card clean.
+  - Prominent, intuitive inline action buttons beside each field: `[✓]` to Apply and `[✕]` to Cancel.
+  - Click-outside auto-apply: clicking outside the active field on free space automatically applies and saves the changes.
+  - Full keyboard shortcut support: `Enter` to save, `Esc` to cancel, and `Ctrl+Enter` for multi-line description.
+
+## 1.2.22
+
+### Русский
+* **Создание плагинов в подключенных внешних папках (Connected Plugins Creation):**
+  - В модальном окне создания (`#create-item-modal`) добавлена возможность выбора подключенных внешних каталогов (`plugins.json`) при создании новых плагинов и навыков.
+  - Бэкенд создания `actions.createItem` теперь поддерживает `targetType === 'connected'`, автоматически создавая структуру плагина (`skills/`, `rules/`, манифест `plugin.json`) внутри выбранной подключенной папки.
+* **Привязка GitHub-репозитория и кроссплатформенное модальное окно метаданных (Plugin GitHub Repo & Metadata Editor):**
+  - Добавлена поддержка указания URL GitHub-репозитория плагина (поле `repository` в `plugin.json`), необходимого для работы механизма автоматических обновлений плагинов через `services/updater.js`.
+  - Поле GitHub-репозитория добавлено в мастер создания нового плагина с автоматической нормализацией формата (`owner/repo` -> `https://github.com/owner/repo`).
+  - Разработано единое кроссплатформенное модальное окно `#edit-plugin-modal` для редактирования метаданных (имя, версия, автор, репозиторий GitHub, описание), полностью устранившее зависимость от VS Code диалогов в десктопном приложении Electron.
+  - В Hero-карточке плагина отображается интерактивный кликабельный чип репозитория `🐙 owner/repo` со ссылкой на GitHub или кнопка быстрого добавления `+ GitHub`, если репозиторий еще не был указан.
+* **Автоматическая проверка обновлений десктопного приложения (Desktop App Self-Update Engine):**
+  - Реализован механизм проверки релизов самого настольного приложения **AI Skill & Plugin Manager Desktop** через GitHub Releases API (с fallback на raw manifest).
+  - Автоматическое определение свежих версий, парсинг списка изменений и получение прямых ссылок на загрузку бинарных Windows-пакетов (`-win.zip`).
+  - Фоновая ненавязчивая проверка при запуске приложения, а также ручной запуск проверки из трея и тулбара.
+  - Верхний динамический баннер `#app-update-banner` в интерфейсе с кнопкой мгновенного скачивания и модальным окном подробностей релиза `#app-update-modal`.
+  - Интеграция в системный трей Windows: индикация доступного обновления в контекстном меню с переходом к загрузке в 1 клик.
+* **Готовая к запуску распакованная версия в корне проекта (`dist-win-unpacked/`):**
+  - В скрипт сборщика `build.bat` и `build-desktop.bat` добавлена автоматическая синхронизация скомпилированного каталога `dist\win-unpacked\` в корневую папку `dist-win-unpacked\`.
+  - Теперь не требуется каждый раз вручную распаковывать `.zip` архив: свежий исполняемый файл `AI Skill & Plugin Manager Desktop.exe` всегда доступен прямо в корне проекта рядом с `dist/`.
+  - Папка `dist-win-unpacked/` надежно добавлена в исключения `.gitignore` и `.vscodeignore`.
+  - Добавлен удобный ярлык сборщика `build-all.bat` для одновременной компиляции расширения IDE (`.vsix`) и настольного приложения в 1 клик.
+* **Очистка кодовой базы и удаление устаревшего монолита (Codebase Cleanup):**
+  - Полностью удален устаревший монолитный бандл `webview/main.js` (167 КБ мертвого кода), исключены возможные коллизии при поиске и уменьшен размер дистрибутива.
+  - Упразднен fallback к `webview/main.js` в `services/fsUtils.js` в пользу чистой динамической сборки Zero-Bundler из модулей `webview/js/`.
+  - Очищены тестовые раннеры от предупреждений о фантомных тестах и добавлены новые наборы автотестов `desktop/test/plugin_creation_and_metadata.test.js` и `desktop/test/app_update.test.js`.
+
+### English
+* **Plugin Creation in Connected Folders (Connected Plugins Creation):**
+  - Added support for selecting external connected plugin folders (`plugins.json`) directly in the creation modal (`#create-item-modal`) when creating plugins and skills.
+  - The core action `actions.createItem` now seamlessly handles `targetType === 'connected'`, provisioning full plugin scaffolds (`skills/`, `rules/`, and `plugin.json` manifest) inside the chosen connected directory.
+* **GitHub Repository Linking & Cross-Platform Metadata Editor:**
+  - Added full support for configuring a plugin's GitHub repository URL (`repository` field in `plugin.json`), enabling auto-updates and update checks via `services/updater.js`.
+  - Added an optional GitHub repository input field to the plugin creation wizard with smart format normalization (`owner/repo` -> `https://github.com/owner/repo`).
+  - Built a unified, cross-platform dark-mode modal `#edit-plugin-modal` for editing plugin metadata (name, version, author, GitHub repository, description), eliminating VS Code prompt dependencies in the Electron desktop app.
+  - Enhanced the plugin Hero card with a clickable `🐙 owner/repo` GitHub link chip and a quick `+ GitHub` action button when no repository is linked.
+* **Desktop App Self-Update Engine:**
+  - Integrated native self-update checking for **AI Skill & Plugin Manager Desktop** via GitHub Releases API with graceful raw manifest fallback.
+  - Automatic detection of new application releases, parsing release changelogs, and extracting direct Windows zip download URLs.
+  - Non-blocking background checks on launch, manual checks via system tray and toolbar.
+  - Added `#app-update-banner` notification bar in webview and `#app-update-modal` for viewing release notes.
+  - Enhanced system tray menu with update alerts and 1-click download actions.
+* **Ready-to-Run Unpacked Application in Root (`dist-win-unpacked/`):**
+  - Enhanced `build.bat` and `build-desktop.bat` to automatically mirror `dist\win-unpacked\` into the root `dist-win-unpacked\` directory.
+  - Eliminates the need to extract `.zip` files manually: the latest `AI Skill & Plugin Manager Desktop.exe` is always up to date and directly runnable.
+  - Added `dist-win-unpacked/` to `.gitignore` and `.vscodeignore`.
+  - Added `build-all.bat` shortcut to package both IDE extension (`.vsix`) and Desktop application concurrently.
+* **Codebase Cleanup & Legacy Monolith Elimination:**
+  - Removed obsolete 167 KB monolithic script `webview/main.js`, streamlining the codebase, reducing package size, and eliminating search collisions.
+  - Cleaned up legacy fallback references in `services/fsUtils.js` in favor of pure modular in-memory assembly.
+  - Purged phantom test warnings from test runners and introduced dedicated test suites `desktop/test/plugin_creation_and_metadata.test.js` and `desktop/test/app_update.test.js`.
+
 ## 1.2.21
 
 ### Русский

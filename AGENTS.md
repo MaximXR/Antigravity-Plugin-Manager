@@ -37,6 +37,67 @@
 3. **Слой интерфейса ([/webview/](/webview/))**:
    - Платформо-независимое модальное окно `#move-modal` ([/webview/js/modals.js](/webview/js/modals.js)). Отображает текущий путь, радио-список стандартных мест назначения, поле произвольной папки с кнопкой обзора и блок подтверждения перезаписи при коллизиях.
 
+### Архитектура создания и редактирования ресурсов (Creation & Metadata Editing Architecture)
+1. **Создание элементов ([/services/actions.js](/services/actions.js) `createItem`)**:
+   - Поддерживает 4 типа назначения (`targetType`):
+     - `global` — стандартные каталоги пользователя (`~/.gemini/config/plugins`, `skills`, `workflows`).
+     - `workspace` — локальные проектные каталоги (`<wsRoot>/.agents/...`).
+     - `connected` — внешние подключенные библиотеки из `plugins.json` / `skills.json` (например, `E:\AI\plugins`).
+     - `plugin` — вложенные каталоги плагина (`plugins/<id>/skills`, `rules`).
+   - Для плагинов создает структуру `skills/`, `rules/`, манифест `plugin.json` с поддержкой поля `repository` (URL репозитория GitHub для авто-обновлений).
+2. **Кроссплатформенное поэлементное редактирование метаданных по месту (Single-Field Hero In-Place Inline Edit Architecture)**:
+   - Полный отказ от отдельного всплывающего модального окна `#edit-plugin-modal` в пользу поэлементного инлайн-редактирования по месту прямо внутри карточки плагина (Hero Card). Из верхней панели действий удалена избыточная кнопка «Редактировать».
+   - Поля редактируются строго по одному при клике на иконку-карандаш или чип добавления (`+ Автор`, `+ GitHub`) через `startFieldEdit(fieldName)` в [webview/js/pluginDetails.js](/webview/js/pluginDetails.js):
+     - Трансформируется только выбранное поле (`displayName`, `version`, `author`, `repository` или `description`), все остальные поля карточки сохраняют стандартный вид без загромождения интерфейса.
+     - Рядом с активным полем ввода отображаются компактные кнопки очистки `[⌫]` (`clearFieldInput`), применения `[✓]` (`saveFieldEdit`) и отката без сохранения `[↺]` (`cancelFieldEdit`).
+     - Реализовано авто-применение изменений при клике в свободное место (click-outside / `pointerdown`), предотвращающее зависание открытых полей.
+     - Поддержка горячих клавиш: `Enter` для сохранения, `Esc` для отмены, `Ctrl+Enter` для сохранения описания.
+     - `renderPluginDetailsView` синхронизирует состояние видимости всех элементов (`#hero-name-view`, `#hero-ver-chip`, `#hero-desc-box-view`), гарантируя отсутствие пропадания заголовка при сохранении.
+   - Исключено дублирование элементов на экране. Сохранение через IPC команду `savePluginMetadata` (поддерживаемую как в Desktop, так и в расширении IDE `extension.js`) атомарно обновляет `plugin.json` по физическому пути плагина (`physicalPath`) и сбрасывает кэш сканеров.
+3. **Единая интеграция с GitHub и открытие ссылок во внешнем браузере (Unified GitHub & External Browser Architecture)**:
+   - Хелпер `resolveItemRepoUrl(item)` в [webview/js/cards.js](/webview/js/cards.js) нормализует URL репозиториев для плагинов, правил и навыков (автоматически наследуя ссылку от родительского плагина для дочерних элементов).
+   - В карточках плагинов основного списка добавлен нижний ряд кнопок действий (`card-bottom-actions`): стилизованная кнопка «Открыть плагин» (`btn-card-open-plugin`) и кнопка «Открыть GitHub» (`btn-card-github`) с индикатором внешнего перехода `↗`, отображаемая только при наличии репозитория. Верхний блок `card-actions-top` очищен от дублирующих круглых кнопок.
+   - В Hero-карточке плагина отображается интерактивный чип `🐙 owner/repo ↗` с индикатором внешнего перехода.
+   - Во всех списках карточек (плагины, навыки, правила) и во вложенных списках внутри окна деталей плагина добавлена кнопка GitHub в верхний блок действий `card-actions-top` и тег с `↗` в нижний блок `card-footer-tags`.
+   - Безопасный IPC-роутер `openExternalUrl` в [desktop/main.js](/desktop/main.js) (`shell.openExternal`) и [extension.js](/extension.js) (`vscode.env.openExternal`) гарантирует мгновенное открытие внешнего браузера без блокировок CSP и всплывающих окон.
+
+### Архитектура хранилищ и подключенных библиотек (Storage & Connected Folders Architecture)
+1. **Безопасное управление записями конфигурации ([/services/fsUtils.js](/services/fsUtils.js))**:
+   - `fsUtils.removeEntryFromJsonConfig(configPath, targetPath)` — исключено ложное удаление записей по `path.basename`. Сопоставление производится строго по исходному, нормализованному и абсолютно разрешенному пути, что гарантирует сохранность остальных подключенных библиотек с одинаковыми именами каталогов (например, `skills` или `plugins`).
+   - `fsUtils.replaceEntryInJsonConfig(configPath, oldPath, newPath, wsRoot)` — атомарная замена устаревшего или перемещенного пути подключенной папки с сохранением параметров (`exclude`, `include_only`) и формата относительных путей.
+2. **Обработка отсутствующих/удаленных папок (Missing Folder Detection & Recovery)**:
+   - `scanners.getConnectedFolders` маркирует папки флагом `exists: fs.existsSync(resolved)`.
+   - В UI отсутствующие папки отображаются с предупреждающим стилем (`repo-chip repo-chip-missing`, красная пунктирная рамка `⚠️ Не найдена`), всплывающим разъяснением, кнопкой быстрой замены пути `[↺ Заменить...]` и кнопкой безопасного отключения `[×]`.
+3. **Эргономичный интерфейс подключения и группировки (Differentiated Scope Connect Architecture)**:
+   - Полное визуальное и функциональное разделение кнопок подключения: глобальная кнопка (`.btn-connect-global`) оформлена в синей теме с иконкой `🌐 + Подключить глобально ▾` (ведет в `~/.gemini/config/...`), а проектная (`.btn-connect-project`) — в изумрудной теме с иконкой `📁 + Подключить к проекту ▾` (ведет в `.agents/...`).
+   - Блоки хранилищ снабжены акцентными цветными полосами слева: синяя `.config-scope-global` и изумрудная `.config-scope-workspace`, визуально связывающие бейдж, название, теги подключенных папок и кнопку выпадающего меню.
+   - Подключенные папки перенесены внутрь блока подстрок `.config-subrows` (`.config-subrow-connected`), исключая оторванность от контекста и длинные разделительные черты.
+4. **Гарантированное открытие системных папок**:
+   - Реализована взаимная синхронизация команд `openActive`, `openActiveSkills`, `openStorage`, `openAgentsFolder` в Desktop (`desktop/main.js`) и расширении IDE (`extension.js`).
+   - При отсутствии физического каталога на диске выполняется рекурсивное создание `fs.mkdirSync(p, { recursive: true })` перед открытием в проводнике OS.
+5. **Управление пользовательскими рабочими папками (Custom Workspace Folders & Path Transparency)**:
+   - Защита от поврежденных записей: автоматическая фильтрация и очистка относительных путей, точек (`.`, `..`) и каталога самого приложения из реестра `~/.gemini/antigravity_desktop_custom_folders.json` и аргументов запуска CLI.
+   - Прозрачность путей в интерфейсе: в выпадающем списке проектов отображается полное физическое расположение папки `📁 <Имя> (<Полный путь>)`, а также всплывающая подсказка с путем к проекту.
+   - Блок рабочей области проекта в карточке «Рабочая область» отображает интерактивный чип полного пути `.workspace-scope-path` с возможностью клика для перехода в проводник ОС.
+   - Добавлены кнопки быстрого открытия корневой папки проекта (`[📁 Папка проекта]`) и удаления текущей пользовательской папки из реестра (`[✕ Убрать из списка]` в блоке рабочей области и `✕ Убрать текущую папку из списка...` в выпадающем селекторе проектов).
+
+### Архитектура самообновления Desktop и распакованной сборки (Desktop Self-Update & Ready-to-Run Engine)
+1. **Движок проверки релизов ([/services/updater.js](/services/updater.js) `checkAppUpdate`)**:
+   - Автоматически проверяет наличие свежих релизов приложения на GitHub (`MaximXR/Antigravity-Plugin-Manager`) через GitHub Releases API с fallback на сырой `desktop/package.json`.
+   - Находит Windows zip-архив релиза (`-win.zip`), парсит описание изменений и формирует прямую ссылку на скачивание.
+   - Фоновая проверка запускается в Electron через 3.5 секунды после старта (`desktop/main.js`), а также вызывается вручную из системного трея или кнопки тулбара «Проверить обновления».
+   - При обнаружении новой версии в Webview отображается интерактивный баннер `#app-update-banner` и модальное окно `#app-update-modal`, а в контекстном меню трея появляется пункт со ссылкой на релиз.
+2. **Распакованное исполнение без разархивации (`dist-win-unpacked/`)**:
+   - Скрипт сборщика `build.bat` (и ярлыки `build-desktop.bat`, `build-all.bat`) после сборки через `electron-builder` автоматически синхронизирует распакованный каталог `dist/win-unpacked` в корневую директорию `dist-win-unpacked/`.
+   - Исполняемый файл `dist-win-unpacked/AI Skill & Plugin Manager Desktop.exe` всегда готов к мгновенному запуску без ручной распаковки zip-архива.
+   - Каталог `dist-win-unpacked/` защищен правилами игнорирования в `.gitignore` и `.vscodeignore`.
+
+### Архитектура Webview (Zero-Bundler Dynamic In-Memory Assembly)
+> **КРИТИЧЕСКИ ВАЖНО ДЛЯ ИИ:**
+> Рабочий фронтенд приложения собран из модулей в каталоге `webview/js/` (`state.js`, `syncEta.js`, `ipc.js`, `controls.js`, `actions.js`, `cards.js`, `pluginDetails.js`, `activeContext.js`, `modals.js`, `main.js`), которые `fsUtils.getWebviewScript` динамически склеивает в оперативной памяти без внешних сборщиков (webpack/vite).
+> Устаревший монолитный бандл `webview/main.js` полностью удален из репозитория.
+> **При поиске и редактировании кода фронтенда всегда работайте строго с модулями в [/webview/js/](/webview/js/)**.
+
 ---
 
 ## 2. Карта файлов и каталогов
@@ -48,7 +109,8 @@
 ├── package.nls.json           # Локализация манифеста (английский)
 ├── package.nls.ru.json        # Локализация манифеста (русский)
 ├── build.bat                  # Унифицированный диспетчер сборки (build.bat [ide|desktop|all])
-├── build-desktop.bat          # Прямой ярлык сборки десктопного приложения (.exe)
+├── build-all.bat              # Ярлык полной одновременной сборки (.vsix + Desktop распакованный)
+├── build-desktop.bat          # Прямой ярлык сборки десктопного приложения (.exe / dist-win-unpacked)
 ├── build-ide.bat              # Прямой ярлык сборки расширения IDE (.vsix)
 ├── README.md                  # Документация для пользователей
 ├── CHANGELOG.md               # История изменений и релизов
@@ -59,13 +121,12 @@
 ├── services/                  # Сервисный слой бэкенда (SSOT ядра)
 │   ├── fsUtils.js             # Системные пути, hydrateWebviewHtml, getWebviewScript, safeMoveDir, парсер frontmatter
 │   ├── scanners.js            # Сканирование ресурсов (плагины, навыки, сценарии, правила, MCP, хуки)
-│   ├── updater.js             # Движок проверки обновлений (GitHub Raw HEAD) и доставки через Git
+│   ├── updater.js             # Движок проверки обновлений (плагины и Desktop App) и доставки через Git
 │   └── actions.js             # Мутации: toggleItem, createItem, deleteItem, moveItem, toggleHook
 │
 ├── webview/                   # Фронтенд интерфейса управления
 │   ├── index.html             # HTML-разметка с плейсхолдерами локализации {{t.key}}
 │   ├── style.css              # CSS-стили (сетки, вкладки, бейджи, модальные окна)
-│   ├── main.js                # Легаси/фолбек бандл скрипта
 │   └── js/                    # Модульная архитектура Zero-Bundler (динамическая склейка в памяти)
 │       ├── state.js           # Мост vscode, массивы данных (pluginsData...), t(), copyText(), escape
 │       ├── syncEta.js         # Расчет времени синхронизации (calculatePluginSyncEta), ETA-таймер
@@ -94,9 +155,10 @@
 │   ├── start.bat              # Запуск десктопа в 1 клик
 │   ├── services/
 │   │   └── projects.js        # Сканер проектов Antigravity 2.0 и файловый вотчер
-│   └── test/                  # Инфраструктура автотестов (move_architecture.test.js, run_tests.js)
+│   └── test/                  # Инфраструктура автотестов (move_architecture, html_hydration, app_update)
 │
-├── dist/                      # Собранные пакеты: .vsix, .zip (для GitHub Release), Portable .exe и win-unpacked/
+├── dist/                      # Собранные пакеты: .vsix, .zip (для GitHub Release) и win-unpacked/
+├── dist-win-unpacked/         # Готовая распакованная версия десктопного приложения (запуск в 1 клик)
 ├── docs/                      # Инженерная документация и база знаний
 │   ├── ANTIGRAVITY_CUSTOMIZATION_ENGINE.md # Архитектура движка, семантика exclude и матрица тестов
 │   └── PLAN_DESKTOP_BUILD_AND_REFACTORING.md # План архитектурного рефакторинга и сборки
@@ -123,7 +185,7 @@
 | :--- | :--- | :--- |
 | **Добавить/изменить сканирование файлов или обнаружение** | [/services/scanners.js](/services/scanners.js) | Функции `scan*` (`scanPlugins`, `scanSkills`, `scanBuiltin*`, `scanAllRules`, `scanAllMcpServers`, `scanAllHooks`). Логика обнаружения и фильтрации находится здесь. |
 | **Изменить механизм путей, ссылок, сборки скриптов или гидратации шаблонов** | [/services/fsUtils.js](/services/fsUtils.js) | Функции путей `getActive*Path`, `getBuiltinPath`, `getWebviewScript`, `hydrateWebviewHtml`, `safeMoveDir`, `createLink`, `parseFrontmatter`, `readPluginInfo`. |
-| **Изменить операции включения/выключения, создания, удаления, перемещения** | [/services/actions.js](/services/actions.js) | Функции `toggleItem`, `createItem`, `deleteItem`, `moveItem`, `toggleHook`. Помнить: для плагинов активное состояние — физическая папка в `plugins/`, синхронизация в `plugin.json` и `config.json`. |
+| **Изменить операции включения/выключения, создания, удаления, перемещения, метаданных** | [/services/actions.js](/services/actions.js) | Функции `toggleItem`, `createItem`, `deleteItem`, `moveItem`, `savePluginMetadata`, `toggleHook`. Помнить: для плагинов активное состояние — физическая папка в `plugins/`, синхронизация в `plugin.json` и `config.json`. |
 | **Изменить проверку или доставку обновлений плагинов** | [/services/updater.js](/services/updater.js), [/extension.js](/extension.js), [/webview/js/modals.js](/webview/js/modals.js) | Функции `checkPluginUpdate`, `checkAllUpdates`, `updatePlugin`. Логика парсинга репозиториев, сравнения semver и гибридной доставки через Git. |
 | **Добавить новый бэкенд-метод или IPC команду** | [/extension.js](/extension.js), [/desktop/main.js](/desktop/main.js), [/webview/js/ipc.js](/webview/js/ipc.js) | В `extension.js` и `desktop/main.js` добавить `case 'commandName'`. Во фронтенде вызывать `vscode.postMessage({ command: 'commandName', ... })`. |
 | **Изменить разметку или добавить новые блоки в UI** | [/webview/index.html](/webview/index.html) | Добавить HTML-элементы. Тексты оборачивать в плейсхолдеры `{{t.keyName}}`. |

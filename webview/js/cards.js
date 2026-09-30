@@ -87,6 +87,44 @@ function getScopeBadgeHtml(item) {
 }
 window.getScopeBadgeHtml = getScopeBadgeHtml;
 
+function resolveItemRepoUrl(item) {
+  if (!item) return null;
+  let raw = item.repository || item.repo || '';
+  if (!raw && item.isPlugin && (item.pluginId || item.pluginName)) {
+    const pId = item.pluginId || item.pluginName;
+    const parentPlugin = (typeof pluginsData !== 'undefined' && Array.isArray(pluginsData))
+      ? pluginsData.find(p => p.id === pId || p.name === pId)
+      : null;
+    if (parentPlugin && parentPlugin.repository) {
+      raw = parentPlugin.repository;
+    }
+  }
+  if (!raw) return null;
+  let url = '';
+  if (typeof raw === 'string') url = raw.trim();
+  else if (typeof raw === 'object' && raw.url) url = String(raw.url || '').trim();
+  if (!url) return null;
+
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('git@')) {
+    const parts = url.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      url = `https://github.com/${parts[0]}/${parts[1]}`;
+    }
+  }
+
+  let label = url;
+  const ghMatch = url.match(/(?:github\.com[/:]|git@github\.com:)([^/]+)\/([^/.]+)(?:\.git)?/i);
+  if (ghMatch) {
+    label = `${ghMatch[1]}/${ghMatch[2]}`;
+  } else {
+    label = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  }
+
+  const href = url.startsWith('http') ? url : `https://${url}`;
+  return { url: href, label: label };
+}
+window.resolveItemRepoUrl = resolveItemRepoUrl;
+
 function getCardStateClass(item) {
   if (!item) return '';
   if (item.isDefaultGlobalBlocked) return 'card-state-blocked';
@@ -344,6 +382,7 @@ function renderPluginCard(p, idx) {
       </div>
     `;
   }
+  const repoInfo = resolveItemRepoUrl(p);
   const updateInfo = updatesData && updatesData.updates ? updatesData.updates[p.id] : null;
   const hasUpdate = updateInfo && updateInfo.hasUpdate;
 
@@ -353,7 +392,7 @@ function renderPluginCard(p, idx) {
         <div class="plugin-meta">
           <div class="plugin-name" style="margin-bottom: 4px; display: inline-flex; align-items: center; gap: 6px;">
             <span class="card-index-num">#${idx}</span>
-            <span class="plugin-title-text clickable" onclick="openPluginDetails('${p.id}')" title="${escapeHtml(p.displayName)}" style="cursor: pointer; font-weight: 700;">${escapeHtml(p.displayName)}</span>
+            <span class="plugin-title-text clickable" onclick="openPluginDetails('${escapeQuotes(p.id)}')" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(p.displayName)}" style="cursor: pointer; font-weight: 700;">${escapeHtml(p.displayName)}</span>
             <button class="copy-name-btn" onclick="copyText(this, '${escapeQuotes(p.name || p.displayName)}')" title="${t('copyName', 'Copy name')}">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -472,6 +511,26 @@ function renderPluginCard(p, idx) {
           </div>
         ` : ''}
       </div>
+
+      <div class="card-bottom-actions">
+        <button class="btn btn-card-action btn-card-open-plugin" onclick="openPluginDetails('${escapeQuotes(p.id)}')" title="${t('openPluginDetails', 'Manage Plugin')}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          <span>${t('openPluginBtn', 'Открыть плагин')}</span>
+        </button>
+        ${repoInfo ? `
+          <button class="btn btn-card-action btn-card-github" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(repoInfo.url)}', event)" title="GitHub: ${escapeHtml(repoInfo.label)} (${escapeQuotes(repoInfo.url)})">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+            </svg>
+            <span>${t('openGithubBtn', 'Открыть GitHub')}</span>
+            <span class="btn-external-arrow">↗</span>
+          </button>
+        ` : ''}
+      </div>
     </div>
   `;
 }
@@ -479,6 +538,7 @@ window.renderPluginCard = renderPluginCard;
 
 function renderRuleCard(r, idx) {
   const scopeBadge = getScopeBadgeHtml(r);
+  const repoInfo = resolveItemRepoUrl(r);
   const ruleFileName = r.physicalPath ? r.physicalPath.split(/[\/\\]/).pop() : (r.name || r.displayName);
   const ruleTag = '@' + ruleFileName;
 
@@ -513,6 +573,13 @@ function renderRuleCard(r, idx) {
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
+            ${repoInfo ? `
+              <button class="card-action-btn" title="GitHub: ${escapeHtml(repoInfo.label)}" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(repoInfo.url)}', event)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                </svg>
+              </button>
+            ` : ''}
             ${r.isPlugin ? `
               <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(r.pluginDisplayName || r.pluginName || r.pluginId)}" onclick="openPluginDetails('${escapeQuotes(r.pluginId || r.pluginName)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -570,6 +637,15 @@ function renderRuleCard(r, idx) {
       <div class="card-footer-tags">
         <div class="resource-tags">
           ${scopeBadge}
+          ${repoInfo ? `
+            <a class="plugin-hero-repo-chip" href="${escapeQuotes(repoInfo.url)}" target="_blank" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(repoInfo.url)}', event);" style="text-decoration: none; font-size: 10px; padding: 1px 7px; display: inline-flex; align-items: center; gap: 4px;" title="${escapeQuotes(repoInfo.url)}">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+              </svg>
+              <span>${escapeHtml(repoInfo.label)}</span>
+              <span style="opacity: 0.8; font-size: 9px;">↗</span>
+            </a>
+          ` : ''}
         </div>
       </div>
     </div>
@@ -579,6 +655,7 @@ window.renderRuleCard = renderRuleCard;
 
 function renderSkillCard(s, idx) {
   const scopeBadge = getScopeBadgeHtml(s);
+  const repoInfo = resolveItemRepoUrl(s);
 
   let skillProjectOverrideHtml = '';
   if (workspaceFoldersList.length > 0 && !s.isLocal && !s.isBuiltin && !s.isPlugin && s.physicalPath) {
@@ -633,6 +710,13 @@ function renderSkillCard(s, idx) {
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
             </button>
+            ${repoInfo ? `
+              <button class="card-action-btn" title="GitHub: ${escapeHtml(repoInfo.label)}" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(repoInfo.url)}', event)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                </svg>
+              </button>
+            ` : ''}
             ${s.isPlugin ? `
               <button class="card-action-btn" title="${t('openPluginDetails', 'Manage Plugin')}: ${escapeHtml(s.pluginDisplayName || s.pluginName || s.pluginId)}" onclick="openPluginDetails('${escapeQuotes(s.pluginId || s.pluginName)}')">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -699,6 +783,15 @@ function renderSkillCard(s, idx) {
       <div class="card-footer-tags">
         <div class="resource-tags">
           ${scopeBadge}
+          ${repoInfo ? `
+            <a class="plugin-hero-repo-chip" href="${escapeQuotes(repoInfo.url)}" target="_blank" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(repoInfo.url)}', event);" style="text-decoration: none; font-size: 10px; padding: 1px 7px; display: inline-flex; align-items: center; gap: 4px;" title="${escapeQuotes(repoInfo.url)}">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+              </svg>
+              <span>${escapeHtml(repoInfo.label)}</span>
+              <span style="opacity: 0.8; font-size: 9px;">↗</span>
+            </a>
+          ` : ''}
         </div>
         ${skillProjectOverrideHtml ? `
           <div class="card-project-override-row">

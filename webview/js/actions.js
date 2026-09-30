@@ -206,22 +206,29 @@ window.moveHook = moveHook;
 
 function editMetadata(field) {
   if (!activePluginId) return;
-  const plugin = pluginsData.find(p => p.id === activePluginId);
-  if (!plugin) return;
-  
-  let currentValue = '';
-  if (field === 'displayName') currentValue = plugin.displayName;
-  else if (field === 'name') currentValue = plugin.name;
-  else if (field === 'description') currentValue = plugin.description;
-  else if (field === 'version') currentValue = plugin.version;
-  else if (field === 'author') currentValue = plugin.author;
-
-  vscode.postMessage({
-    command: 'editPluginMetadata',
-    id: activePluginId,
-    isEnabled: plugin.isEnabled,
-    field: field,
-    value: currentValue
-  });
+  if (typeof enterHeroEditMode === 'function') {
+    enterHeroEditMode(field);
+    return;
+  }
+  if (typeof openEditPluginModal === 'function') {
+    openEditPluginModal(activePluginId, field);
+    return;
+  }
 }
 window.editMetadata = editMetadata;
+
+function openExternalUrl(url, event) {
+  if (event) {
+    event.stopPropagation();
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+  }
+  if (!url) return;
+  const href = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+  vscode.postMessage({
+    command: 'openExternalUrl',
+    url: href
+  });
+}
+window.openExternalUrl = openExternalUrl;

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-win-unpacked/
 *.vsix
 plugin_manager_debug.log
 Thumbs.db

@@ -878,7 +878,13 @@ function writePluginMetaField(pluginDir, field, value) {
       data = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf8'));
     } catch (e) {}
   }
-  data[field] = value;
+  if (field === 'repository') {
+    const trimmed = String(value || '').trim();
+    if (trimmed) data.repository = trimmed;
+    else delete data.repository;
+  } else {
+    data[field] = value;
+  }
   fs.writeFileSync(pluginJsonPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
@@ -1082,16 +1088,74 @@ function addEntryToJsonConfig(configPath, targetPath, options = {}, wsRoot = nul
 }
 
 function removeEntryFromJsonConfig(configPath, targetPath) {
+  if (!configPath || !targetPath) return;
   const config = readJsonConfigFile(configPath);
-  const normTarget = path.normalize(targetPath).toLowerCase();
-  const baseNameTarget = path.basename(targetPath).toLowerCase();
+  if (!config.entries || !Array.isArray(config.entries)) return;
+
+  const baseDir = path.dirname(configPath);
+  const cleanTarget = String(targetPath).trim().replace(/[/\\]+$/, '');
+  const normTarget = path.normalize(cleanTarget).toLowerCase();
+  const resolvedTarget = path.normalize(resolveJsonConfigPath(cleanTarget, baseDir)).toLowerCase();
 
   config.entries = config.entries.filter(entry => {
+    if (!entry) return false;
     const entryP = typeof entry === 'string' ? entry : entry.path;
-    const resolved = resolveJsonConfigPath(entryP, path.dirname(configPath));
-    if (path.normalize(resolved).toLowerCase() === normTarget) return false;
-    if (path.basename(resolved).toLowerCase() === baseNameTarget) return false;
+    if (!entryP) return false;
+
+    const cleanEntry = String(entryP).trim().replace(/[/\\]+$/, '');
+    const normEntry = path.normalize(cleanEntry).toLowerCase();
+    const resolvedEntry = path.normalize(resolveJsonConfigPath(cleanEntry, baseDir)).toLowerCase();
+
+    // Match exact raw path, normalized path, or resolved path
+    if (cleanEntry.toLowerCase() === cleanTarget.toLowerCase()) return false;
+    if (normEntry === normTarget) return false;
+    if (resolvedEntry === resolvedTarget) return false;
+    if (resolvedEntry === normTarget) return false;
+    if (normEntry === resolvedTarget) return false;
+
     return true;
+  });
+
+  writeJsonConfigFile(configPath, config);
+}
+
+function replaceEntryInJsonConfig(configPath, oldPath, newPath, wsRoot = null) {
+  if (!configPath || !oldPath || !newPath) return;
+  const config = readJsonConfigFile(configPath);
+  if (!config.entries || !Array.isArray(config.entries)) return;
+
+  const baseDir = path.dirname(configPath);
+  const cleanOld = String(oldPath).trim().replace(/[/\\]+$/, '');
+  const normOld = path.normalize(cleanOld).toLowerCase();
+  const resolvedOld = path.normalize(resolveJsonConfigPath(cleanOld, baseDir)).toLowerCase();
+
+  const formattedNew = formatPathForConfig(newPath, wsRoot);
+
+  config.entries = config.entries.map(entry => {
+    if (!entry) return entry;
+    const entryP = typeof entry === 'string' ? entry : entry.path;
+    if (!entryP) return entry;
+
+    const cleanEntry = String(entryP).trim().replace(/[/\\]+$/, '');
+    const normEntry = path.normalize(cleanEntry).toLowerCase();
+    const resolvedEntry = path.normalize(resolveJsonConfigPath(cleanEntry, baseDir)).toLowerCase();
+
+    const isMatch = (
+      cleanEntry.toLowerCase() === cleanOld.toLowerCase() ||
+      normEntry === normOld ||
+      resolvedEntry === resolvedOld ||
+      resolvedEntry === normOld ||
+      normEntry === resolvedOld
+    );
+
+    if (isMatch) {
+      if (typeof entry === 'string') {
+        return formattedNew;
+      } else {
+        return { ...entry, path: formattedNew };
+      }
+    }
+    return entry;
   });
 
   writeJsonConfigFile(configPath, config);
@@ -1440,11 +1504,11 @@ function migrateFromLegacyStorage(context) {
 }
 
 /**
- * Assembles webview script content from modular webview/js/ directory,
- * falling back to webview/main.js if webview/js/ is not present.
+ * Assembles webview script content from modular webview/js/ directory (Zero-Bundler in-memory assembly).
  */
 function getWebviewScript(webviewDir) {
-  const jsDir = path.join(webviewDir, 'js');
+  const baseDir = webviewDir || path.join(__dirname, '..', 'webview');
+  const jsDir = path.join(baseDir, 'js');
   if (fs.existsSync(jsDir)) {
     const modules = [
       'state.js',
@@ -1462,10 +1526,6 @@ function getWebviewScript(webviewDir) {
       .filter((m) => fs.existsSync(path.join(jsDir, m)))
       .map((m) => fs.readFileSync(path.join(jsDir, m), 'utf8'))
       .join('\n\n');
-  }
-  const fallbackPath = path.join(webviewDir, 'main.js');
-  if (fs.existsSync(fallbackPath)) {
-    return fs.readFileSync(fallbackPath, 'utf8');
   }
   return '';
 }
@@ -1845,6 +1905,7 @@ module.exports = {
   isPatternMatch,
   addEntryToJsonConfig,
   removeEntryFromJsonConfig,
+  replaceEntryInJsonConfig,
   addExcludeToJsonConfig,
   removeExcludeFromJsonConfig,
   isPathInJsonConfigEntries,

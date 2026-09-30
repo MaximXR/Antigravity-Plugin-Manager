@@ -442,6 +442,7 @@ async function createItem(data, lang) {
     description,
     version,
     author,
+    repository,
     createScripts,
     createExamples,
     createDocs,
@@ -470,6 +471,12 @@ async function createItem(data, lang) {
   } else if (targetType === 'plugin') {
     if (category === 'skill') targetDir = path.join(targetId, 'skills', name);
     else if (category === 'rule') targetDir = path.join(targetId, 'rules');
+  } else if (targetType === 'connected') {
+    const parentDir = targetId;
+    if (category === 'plugin') targetDir = path.join(parentDir, name);
+    else if (category === 'skill') targetDir = path.join(parentDir, name);
+    else if (category === 'workflow') targetDir = path.join(parentDir, 'workflows');
+    else if (category === 'rule') targetDir = path.join(parentDir, 'rules');
   }
 
   if (!targetDir) {
@@ -533,6 +540,9 @@ description: "${escapeJsString(description || cleanTitle)}"
         version: version || '1.0.0',
         author: author || ''
       };
+      if (repository && typeof repository === 'string' && repository.trim()) {
+        manifest.repository = repository.trim();
+      }
       fs.writeFileSync(path.join(targetDir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf8');
       vscode.window.showInformationMessage(`Plugin "${name}" created successfully.`);
     } else if (category === 'skill') {
@@ -901,6 +911,38 @@ async function resolveConflict(data, lang) {
   }
 }
 
+// Safely updates plugin.json metadata fields (displayName, version, author, repository, description)
+async function savePluginMetadata(physicalPath, metadata = {}, lang = 'en') {
+  if (!physicalPath || !fs.existsSync(physicalPath)) {
+    throw new Error(lang === 'ru' ? 'Папка плагина не найдена.' : 'Plugin folder not found.');
+  }
+  const pluginJsonPath = path.join(physicalPath, 'plugin.json');
+  let data = {};
+  if (fs.existsSync(pluginJsonPath)) {
+    try {
+      data = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf8'));
+    } catch (e) {
+      data = {};
+    }
+  }
+
+  if (metadata.displayName !== undefined) data.displayName = String(metadata.displayName || '').trim();
+  if (metadata.description !== undefined) data.description = String(metadata.description || '').trim();
+  if (metadata.version !== undefined) data.version = String(metadata.version || '1.0.0').trim();
+  if (metadata.author !== undefined) data.author = String(metadata.author || '').trim();
+  if (metadata.repository !== undefined) {
+    const repoStr = String(metadata.repository || '').trim();
+    if (repoStr) {
+      data.repository = repoStr;
+    } else {
+      delete data.repository;
+    }
+  }
+
+  fs.writeFileSync(pluginJsonPath, JSON.stringify(data, null, 2), 'utf8');
+  return data;
+}
+
 module.exports = {
   toggleItem,
   togglePluginGlobal,
@@ -920,7 +962,8 @@ module.exports = {
   moveItem,
   isProtectedResource,
   resolveConflict,
-  migrateStorage
+  migrateStorage,
+  savePluginMetadata
 };
 
 

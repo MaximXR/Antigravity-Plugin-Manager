@@ -411,10 +411,112 @@ async function updatePlugin(plugin, onProgress = () => {}) {
   };
 }
 
+/**
+ * Checks for a new release of the Desktop application itself on GitHub.
+ * Returns {
+ *   hasUpdate: boolean,
+ *   currentVersion: string,
+ *   remoteVersion: string,
+ *   releaseName: string,
+ *   releaseUrl: string,
+ *   downloadUrl: string,
+ *   assetName: string,
+ *   releaseNotes: string,
+ *   publishedAt: string,
+ *   error?: string
+ * }
+ */
+async function checkAppUpdate(currentVersion, repo = 'MaximXR/Antigravity-Plugin-Manager') {
+  const cleanCurrent = String(currentVersion || '0.0.0').replace(/^[vV]/, '').trim();
+  const repoSlug = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+
+  let releaseData = null;
+  let remoteVersion = null;
+  let releaseUrl = `https://github.com/${repoSlug}/releases`;
+  let downloadUrl = releaseUrl;
+  let assetName = '';
+  let releaseNotes = '';
+  let releaseName = '';
+  let publishedAt = '';
+
+  // 1. Try GitHub Releases API first
+  try {
+    const apiUrl = `https://api.github.com/repos/${repoSlug}/releases/latest`;
+    releaseData = await fetchHttpsJson(apiUrl, 7000);
+    if (releaseData && releaseData.tag_name) {
+      remoteVersion = String(releaseData.tag_name).replace(/^[vV]/, '').trim();
+      releaseUrl = releaseData.html_url || releaseUrl;
+      releaseName = releaseData.name || releaseData.tag_name;
+      releaseNotes = releaseData.body || '';
+      publishedAt = releaseData.published_at || '';
+
+      // Look for Windows zip or exe asset
+      if (Array.isArray(releaseData.assets) && releaseData.assets.length > 0) {
+        const zipAsset = releaseData.assets.find(a => typeof a.name === 'string' && a.name.endsWith('-win.zip'));
+        const exeAsset = releaseData.assets.find(a => typeof a.name === 'string' && a.name.endsWith('.exe'));
+        const targetAsset = zipAsset || exeAsset;
+        if (targetAsset) {
+          downloadUrl = targetAsset.browser_download_url;
+          assetName = targetAsset.name;
+        }
+      }
+    }
+  } catch (apiErr) {
+    // API failed (e.g. rate limit, 404, offline)
+    // 2. Fallback to raw desktop/package.json or package.json on master
+    try {
+      const rawPkgUrl = `https://raw.githubusercontent.com/${repoSlug}/master/desktop/package.json`;
+      const rawPkg = await fetchHttpsJson(rawPkgUrl, 7000);
+      if (rawPkg && rawPkg.version) {
+        remoteVersion = String(rawPkg.version).replace(/^[vV]/, '').trim();
+      }
+    } catch (_) {
+      try {
+        const rootPkgUrl = `https://raw.githubusercontent.com/${repoSlug}/master/package.json`;
+        const rootPkg = await fetchHttpsJson(rootPkgUrl, 7000);
+        if (rootPkg && rootPkg.version) {
+          remoteVersion = String(rootPkg.version).replace(/^[vV]/, '').trim();
+        }
+      } catch (rawErr) {}
+    }
+  }
+
+  if (!remoteVersion) {
+    return {
+      hasUpdate: false,
+      currentVersion: cleanCurrent,
+      remoteVersion: cleanCurrent,
+      releaseName: `v${cleanCurrent}`,
+      releaseUrl,
+      downloadUrl,
+      assetName: '',
+      releaseNotes: '',
+      publishedAt: '',
+      error: 'Unable to check for updates'
+    };
+  }
+
+  const hasUpdate = compareSemver(remoteVersion, cleanCurrent) > 0;
+
+  return {
+    hasUpdate,
+    currentVersion: cleanCurrent,
+    remoteVersion,
+    releaseName: releaseName || `v${remoteVersion}`,
+    releaseUrl,
+    downloadUrl: downloadUrl || releaseUrl,
+    assetName,
+    releaseNotes,
+    publishedAt
+  };
+}
+
 module.exports = {
   parsePluginRepo,
   compareSemver,
   checkPluginUpdate,
   checkAllUpdates,
+  checkAppUpdate,
   updatePlugin
 };
+

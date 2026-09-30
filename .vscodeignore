@@ -3,6 +3,7 @@
 .vscodeignore
 *.vsix
 dist/**
+dist-win-unpacked/**
 build*.bat
 plugin_manager_debug.log
 .agents/**

@@ -1,6 +1,93 @@
 // Module: pluginDetails.js - Plugin Details view, Hero card, sub-resource rendering
 
+let activeEditingField = null;
+let heroInlineListenersBound = false;
+
+const HERO_FIELDS = {
+  displayName: {
+    viewId: 'hero-name-view',
+    editBoxId: 'hero-edit-box-displayName',
+    inputId: 'inline-edit-displayName',
+    getValue: (p) => p.displayName || p.name || p.id || '',
+    setValue: (p, val) => { p.displayName = val; },
+    displayType: 'inline-flex'
+  },
+  version: {
+    viewId: 'hero-ver-chip',
+    editBoxId: 'hero-edit-box-version',
+    inputId: 'inline-edit-version',
+    getValue: (p) => p.version || '1.0.0',
+    setValue: (p, val) => { p.version = val; },
+    displayType: 'inline-flex'
+  },
+  author: {
+    viewId: 'hero-author-container',
+    addBtnId: 'hero-add-author-btn',
+    editBoxId: 'hero-edit-box-author',
+    inputId: 'inline-edit-author',
+    getValue: (p) => p.author || '',
+    setValue: (p, val) => { p.author = val; },
+    displayType: 'inline-flex'
+  },
+  repository: {
+    viewId: 'hero-repo-container',
+    addBtnId: 'hero-add-repo-btn',
+    editBoxId: 'hero-edit-box-repository',
+    inputId: 'inline-edit-repository',
+    getValue: (p) => {
+      if (typeof p.repository === 'string') return p.repository;
+      if (p.repository && p.repository.url) return p.repository.url;
+      return '';
+    },
+    setValue: (p, val) => { p.repository = val; },
+    displayType: 'inline-flex'
+  },
+  description: {
+    viewId: 'hero-desc-box-view',
+    editBoxId: 'hero-edit-box-description',
+    inputId: 'inline-edit-description',
+    getValue: (p) => p.description || '',
+    setValue: (p, val) => { p.description = val; },
+    displayType: 'flex'
+  }
+};
+
+function normalizeFieldName(field) {
+  if (!field) return 'displayName';
+  if (field === 'name') return 'displayName';
+  if (field === 'repo') return 'repository';
+  if (field === 'desc') return 'description';
+  return field;
+}
+
+function showHeroInlineError(msg) {
+  const errorBox = document.getElementById('hero-inline-error');
+  if (errorBox) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+}
+
+function hideHeroInlineError() {
+  const errorBox = document.getElementById('hero-inline-error');
+  if (errorBox) {
+    errorBox.textContent = '';
+    errorBox.style.display = 'none';
+  }
+}
+
 function openPluginDetails(pluginId) {
+  if (activeEditingField) {
+    const config = HERO_FIELDS[activeEditingField];
+    if (config) {
+      const editBox = document.getElementById(config.editBoxId);
+      if (editBox) editBox.style.display = 'none';
+      const viewEl = document.getElementById(config.viewId);
+      if (viewEl) viewEl.style.display = config.displayType || 'inline-flex';
+    }
+    activeEditingField = null;
+    hideHeroInlineError();
+  }
   if (currentTab !== 'plugins') {
     previousTabBeforePluginDetails = currentTab;
   }
@@ -21,6 +108,15 @@ function openPluginDetails(pluginId) {
 window.openPluginDetails = openPluginDetails;
 
 function closePluginDetails() {
+  if (typeof activeEditingField !== 'undefined' && activeEditingField) {
+    const config = typeof HERO_FIELDS !== 'undefined' ? HERO_FIELDS[activeEditingField] : null;
+    if (config) {
+      const editBox = document.getElementById(config.editBoxId);
+      if (editBox) editBox.style.display = 'none';
+    }
+    activeEditingField = null;
+    if (typeof hideHeroInlineError === 'function') hideHeroInlineError();
+  }
   activePluginId = null;
   if (searchInput) searchInput.value = '';
   if (previousTabBeforePluginDetails) {
@@ -87,18 +183,29 @@ function renderPluginDetailsView() {
   const heroNameEl = document.getElementById('hero-display-name');
   if (heroNameEl) heroNameEl.textContent = pluginDisplayName;
 
+  const isEditingDisplayName = activeEditingField === 'displayName';
+  const heroNameView = document.getElementById('hero-name-view');
+  const heroNameEditBox = document.getElementById('hero-edit-box-displayName');
+  if (heroNameView) heroNameView.style.display = isEditingDisplayName ? 'none' : 'inline-flex';
+  if (heroNameEditBox) heroNameEditBox.style.display = isEditingDisplayName ? 'inline-flex' : 'none';
+
   const heroCopyTitleBtn = document.getElementById('hero-copy-title-btn');
   if (heroCopyTitleBtn) {
+    heroCopyTitleBtn.style.display = isEditingDisplayName ? 'none' : 'inline-flex';
     heroCopyTitleBtn.onclick = function() { copyText(this, rawId); };
   }
 
   const heroIdBadge = document.getElementById('hero-id-badge');
   const heroIdEl = document.getElementById('hero-id-text');
   const heroCopyIdBtn = document.getElementById('hero-copy-id-btn');
+  const heroIdElEdit = document.getElementById('hero-id-text-edit');
+  if (heroIdElEdit) {
+    heroIdElEdit.textContent = 'id: ' + rawId;
+  }
 
-  // Only display the separate ID badge if displayName is distinct from the raw ID
+  // Only display the separate ID badge if displayName is distinct from the raw ID and not editing
   if (heroIdBadge) {
-    if (plugin.displayName && plugin.displayName !== rawId) {
+    if (!isEditingDisplayName && plugin.displayName && plugin.displayName !== rawId) {
       heroIdBadge.style.display = 'inline-flex';
       if (heroIdEl) heroIdEl.textContent = 'id: ' + rawId;
       if (heroCopyIdBtn) {
@@ -113,14 +220,94 @@ function renderPluginDetailsView() {
   const heroVerEl = document.getElementById('hero-version');
   if (heroVerEl) heroVerEl.textContent = 'v' + (plugin.version || '1.0.0');
 
+  const isEditingVersion = activeEditingField === 'version';
+  const heroVerChip = document.getElementById('hero-ver-chip');
+  const heroVerEditBox = document.getElementById('hero-edit-box-version');
+  if (heroVerChip) heroVerChip.style.display = isEditingVersion ? 'none' : 'inline-flex';
+  if (heroVerEditBox) heroVerEditBox.style.display = isEditingVersion ? 'inline-flex' : 'none';
+
+  const isEditingAuthor = activeEditingField === 'author';
   const heroAuthorContainer = document.getElementById('hero-author-container');
   const heroAuthorEl = document.getElementById('hero-author');
+  const heroAddAuthorBtn = document.getElementById('hero-add-author-btn');
+  const heroAuthorEditBox = document.getElementById('hero-edit-box-author');
+  if (heroAuthorEditBox) heroAuthorEditBox.style.display = isEditingAuthor ? 'inline-flex' : 'none';
+
   if (heroAuthorContainer && heroAuthorEl) {
-    if (plugin.author) {
+    if (isEditingAuthor) {
+      heroAuthorContainer.style.display = 'none';
+      if (heroAddAuthorBtn) heroAddAuthorBtn.style.display = 'none';
+    } else if (plugin.author) {
       heroAuthorEl.textContent = plugin.author;
       heroAuthorContainer.style.display = 'inline-flex';
+      if (heroAddAuthorBtn) heroAddAuthorBtn.style.display = 'none';
     } else {
       heroAuthorContainer.style.display = 'none';
+      if (heroAddAuthorBtn) {
+        heroAddAuthorBtn.style.display = 'inline-flex';
+        heroAddAuthorBtn.onclick = (e) => {
+          e.stopPropagation();
+          startFieldEdit('author');
+        };
+      }
+    }
+  }
+
+  // Hero GitHub Repository
+  const isEditingRepo = activeEditingField === 'repository';
+  const heroRepoContainer = document.getElementById('hero-repo-container');
+  const heroRepoLink = document.getElementById('hero-repo-link');
+  const heroRepoLinkText = document.getElementById('hero-repo-link-text');
+  const heroAddRepoBtn = document.getElementById('hero-add-repo-btn');
+  const heroRepoEditBox = document.getElementById('hero-edit-box-repository');
+  if (heroRepoEditBox) heroRepoEditBox.style.display = isEditingRepo ? 'inline-flex' : 'none';
+
+  const rawRepo = plugin.repository || '';
+  let cleanRepoLabel = '';
+  let repoHref = '';
+
+  if (rawRepo) {
+    if (typeof rawRepo === 'string') {
+      repoHref = rawRepo.trim();
+    } else if (typeof rawRepo === 'object' && rawRepo.url) {
+      repoHref = String(rawRepo.url || '').trim();
+    }
+  }
+
+  if (repoHref) {
+    const ghMatch = repoHref.match(/(?:github\.com[/:]|git@github\.com:)([^/]+)\/([^/.]+)(?:\.git)?/i);
+    if (ghMatch) {
+      cleanRepoLabel = `${ghMatch[1]}/${ghMatch[2]}`;
+    } else {
+      cleanRepoLabel = repoHref.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    }
+  }
+
+  if (isEditingRepo) {
+    if (heroRepoContainer) heroRepoContainer.style.display = 'none';
+    if (heroAddRepoBtn) heroAddRepoBtn.style.display = 'none';
+  } else if (cleanRepoLabel && repoHref) {
+    if (heroRepoContainer) {
+      heroRepoContainer.style.display = 'inline-flex';
+      if (heroRepoLink) {
+        if (heroRepoLinkText) {
+          heroRepoLinkText.textContent = cleanRepoLabel;
+        } else {
+          heroRepoLink.textContent = cleanRepoLabel;
+        }
+        heroRepoLink.href = repoHref.startsWith('http') ? repoHref : `https://${repoHref}`;
+        heroRepoLink.title = repoHref;
+      }
+    }
+    if (heroAddRepoBtn) heroAddRepoBtn.style.display = 'none';
+  } else {
+    if (heroRepoContainer) heroRepoContainer.style.display = 'none';
+    if (heroAddRepoBtn) {
+      heroAddRepoBtn.style.display = 'inline-flex';
+      heroAddRepoBtn.onclick = (e) => {
+        e.stopPropagation();
+        startFieldEdit('repository');
+      };
     }
   }
 
@@ -274,12 +461,18 @@ function renderPluginDetailsView() {
   }
 
   // Hero Description
+  const isEditingDesc = activeEditingField === 'description';
+  const heroDescBoxView = document.getElementById('hero-desc-box-view');
+  const heroDescEditBox = document.getElementById('hero-edit-box-description');
   const heroDescEl = document.getElementById('hero-description');
+
+  if (heroDescBoxView) heroDescBoxView.style.display = isEditingDesc ? 'none' : 'flex';
+  if (heroDescEditBox) heroDescEditBox.style.display = isEditingDesc ? 'flex' : 'none';
   if (heroDescEl) {
     heroDescEl.textContent = plugin.description || t('noDescription', 'No description.');
   }
 
-  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+  const query = searchInput && typeof searchInput.value === 'string' ? searchInput.value.toLowerCase().trim() : '';
 
   // Render Skills
   let skillsList = plugin.skills || [];
@@ -293,8 +486,10 @@ function renderPluginDetailsView() {
   const hasSkills = skillsList.length > 0;
   document.getElementById('detail-skills-section').style.display = hasSkills ? 'block' : 'none';
   const skillsContainer = document.getElementById('detail-skills-list');
+  const pluginRepoInfo = typeof resolveItemRepoUrl === 'function' ? resolveItemRepoUrl(plugin) : null;
   if (hasSkills) {
     skillsContainer.innerHTML = skillsList.map(s => {
+      const sRepoInfo = (typeof resolveItemRepoUrl === 'function' ? resolveItemRepoUrl(s) : null) || pluginRepoInfo;
       return `
         <div class="glass-card plugin-card ${getCardStateClass(s)}">
           <div class="plugin-top">
@@ -317,6 +512,13 @@ function renderPluginDetailsView() {
             
             <div class="card-right-group">
               <div class="card-actions-top">
+                ${sRepoInfo ? `
+                  <button class="card-action-btn" title="GitHub: ${escapeHtml(sRepoInfo.label)}" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(sRepoInfo.url)}', event)">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                    </svg>
+                  </button>
+                ` : ''}
                 <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('skill', '${escapeQuotes(s.physicalPath)}')">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -351,13 +553,24 @@ function renderPluginDetailsView() {
               </div>
             </div>
           </div>
-          ${plugin.isLocal ? `
+          ${(plugin.isLocal || sRepoInfo) ? `
             <div class="card-footer-tags">
               <div class="resource-tags">
-                <div class="res-tag active res-local" style="font-size: 10px; padding: 2px 5px;">
-                  <span class="res-indicator"></span>
-                  <span>${t('local', 'Local')} • ${escapeHtml(plugin.workspaceName)}</span>
-                </div>
+                ${plugin.isLocal ? `
+                  <div class="res-tag active res-local" style="font-size: 10px; padding: 2px 5px;">
+                    <span class="res-indicator"></span>
+                    <span>${t('local', 'Local')} • ${escapeHtml(plugin.workspaceName)}</span>
+                  </div>
+                ` : ''}
+                ${sRepoInfo ? `
+                  <div class="res-tag active res-github clickable" style="font-size: 10px; padding: 2px 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(sRepoInfo.url)}', event)" title="GitHub: ${escapeQuotes(sRepoInfo.url)}">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                    </svg>
+                    <span>${escapeHtml(sRepoInfo.label)}</span>
+                    <span style="font-size: 9px; opacity: 0.85;">↗</span>
+                  </div>
+                ` : ''}
               </div>
             </div>
           ` : ''}
@@ -426,6 +639,13 @@ function renderPluginDetailsView() {
           ${r.description ? `<div class="resource-desc" title="${escapeHtml(r.description)}">${escapeHtml(r.description)}</div>` : ''}
         </div>
         <div class="resource-actions">
+          ${pluginRepoInfo ? `
+            <button class="card-action-btn" title="GitHub: ${escapeHtml(pluginRepoInfo.label)}" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(pluginRepoInfo.url)}', event)">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+              </svg>
+            </button>
+          ` : ''}
           <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('rule', '${escapeQuotes(r.physicalPath)}')">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -488,6 +708,13 @@ function renderPluginDetailsView() {
             ${w.description ? `<div class="resource-desc" title="${escapeHtml(w.description)}">${escapeHtml(w.description)}</div>` : ''}
           </div>
           <div class="resource-actions">
+            ${pluginRepoInfo ? `
+              <button class="card-action-btn" title="GitHub: ${escapeHtml(pluginRepoInfo.label)}" onclick="event.stopPropagation(); openExternalUrl('${escapeQuotes(pluginRepoInfo.url)}', event)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                </svg>
+              </button>
+            ` : ''}
             <button class="card-action-btn" title="${t('openInEditor', 'Open in Editor')}" onclick="openFileInEditor('workflow', '${escapeQuotes(w.physicalPath)}')">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -650,3 +877,248 @@ function renderPluginDetailsView() {
   }
 }
 window.renderPluginDetailsView = renderPluginDetailsView;
+
+function startFieldEdit(fieldName) {
+  fieldName = normalizeFieldName(fieldName);
+  const config = HERO_FIELDS[fieldName];
+  if (!config) return;
+
+  const plugin = pluginsData.find(p => p.id === activePluginId || p.name === activePluginId);
+  if (!plugin) return;
+
+  // If another field is currently being edited, silently apply it first
+  if (activeEditingField && activeEditingField !== fieldName) {
+    saveFieldEdit(activeEditingField, null, true);
+  }
+
+  activeEditingField = fieldName;
+  hideHeroInlineError();
+
+  // Hide view element and add-chip button if present
+  const viewEl = document.getElementById(config.viewId);
+  if (viewEl) viewEl.style.display = 'none';
+  if (config.addBtnId) {
+    const addBtn = document.getElementById(config.addBtnId);
+    if (addBtn) addBtn.style.display = 'none';
+  }
+  if (fieldName === 'displayName') {
+    const copyTitleBtn = document.getElementById('hero-copy-title-btn');
+    if (copyTitleBtn) copyTitleBtn.style.display = 'none';
+    const idBadge = document.getElementById('hero-id-badge');
+    if (idBadge) idBadge.style.display = 'none';
+  }
+
+  // Show inline edit box
+  const editBox = document.getElementById(config.editBoxId);
+  if (editBox) {
+    editBox.style.display = config.displayType || 'inline-flex';
+  }
+
+  // Populate input value and focus
+  const inputEl = document.getElementById(config.inputId);
+  if (inputEl) {
+    inputEl.value = config.getValue(plugin);
+    setTimeout(() => {
+      inputEl.focus();
+      inputEl.select();
+    }, 40);
+  }
+
+  setupHeroInlineListeners();
+}
+window.startFieldEdit = startFieldEdit;
+
+function clearFieldInput(fieldName, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  fieldName = normalizeFieldName(fieldName || activeEditingField);
+  const config = HERO_FIELDS[fieldName];
+  if (config) {
+    const el = document.getElementById(config.inputId);
+    if (el) {
+      el.value = '';
+      el.focus();
+    }
+  }
+}
+window.clearFieldInput = clearFieldInput;
+
+function cancelFieldEdit(fieldName, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  if (!activeEditingField && !fieldName) {
+    return;
+  }
+  fieldName = normalizeFieldName(fieldName || activeEditingField);
+  const config = HERO_FIELDS[fieldName];
+
+  hideHeroInlineError();
+
+  if (config) {
+    const editBox = document.getElementById(config.editBoxId);
+    if (editBox) editBox.style.display = 'none';
+    const viewEl = document.getElementById(config.viewId);
+    if (viewEl) viewEl.style.display = config.displayType || 'inline-flex';
+  }
+
+  activeEditingField = null;
+  if (activePluginId) {
+    renderPluginDetailsView();
+  }
+}
+window.cancelFieldEdit = cancelFieldEdit;
+
+function saveFieldEdit(fieldName, event, silent = false) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  fieldName = normalizeFieldName(fieldName || activeEditingField);
+  const config = HERO_FIELDS[fieldName];
+  if (!config) {
+    activeEditingField = null;
+    return;
+  }
+
+  const plugin = pluginsData.find(p => p.id === activePluginId || p.name === activePluginId);
+  if (!plugin) {
+    cancelFieldEdit(fieldName);
+    return;
+  }
+
+  hideHeroInlineError();
+
+  const inputEl = document.getElementById(config.inputId);
+  let val = inputEl ? inputEl.value.trim() : '';
+
+  // Validation
+  if (fieldName === 'displayName' && !val) {
+    if (silent) {
+      cancelFieldEdit(fieldName);
+      return;
+    }
+    showHeroInlineError(t('validationFolderEmpty', 'Name cannot be empty.'));
+    inputEl?.focus();
+    return;
+  }
+
+  // Auto-normalize shorthand repository: "owner/repo" -> "https://github.com/owner/repo"
+  if (fieldName === 'repository' && val && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('git@')) {
+    const parts = val.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      val = `https://github.com/${parts[0]}/${parts[1]}`;
+    }
+  }
+
+  const curVal = config.getValue(plugin);
+  const hasChanged = val !== curVal;
+
+  if (hasChanged) {
+    config.setValue(plugin, val);
+
+    let currentRepo = '';
+    if (typeof plugin.repository === 'string') {
+      currentRepo = plugin.repository;
+    } else if (plugin.repository && plugin.repository.url) {
+      currentRepo = plugin.repository.url;
+    }
+
+    setSyncingState(2000);
+    vscode.postMessage({
+      command: 'savePluginMetadata',
+      id: plugin.id,
+      physicalPath: plugin.physicalPath,
+      metadata: {
+        displayName: plugin.displayName || plugin.name || plugin.id || '',
+        version: plugin.version || '1.0.0',
+        author: plugin.author || '',
+        repository: currentRepo,
+        description: plugin.description || ''
+      }
+    });
+  }
+
+  const editBox = document.getElementById(config.editBoxId);
+  if (editBox) editBox.style.display = 'none';
+  const viewEl = document.getElementById(config.viewId);
+  if (viewEl) viewEl.style.display = config.displayType || 'inline-flex';
+
+  activeEditingField = null;
+  renderPluginDetailsView();
+}
+window.saveFieldEdit = saveFieldEdit;
+
+// Backward-compatibility wrappers
+function enterHeroEditMode(field) {
+  startFieldEdit(field || 'displayName');
+}
+window.enterHeroEditMode = enterHeroEditMode;
+
+function exitHeroEditMode() {
+  cancelFieldEdit();
+}
+window.exitHeroEditMode = exitHeroEditMode;
+
+function saveHeroInlineEdit() {
+  if (activeEditingField) {
+    saveFieldEdit(activeEditingField);
+  }
+}
+window.saveHeroInlineEdit = saveHeroInlineEdit;
+
+function setupHeroInlineListeners() {
+  if (heroInlineListenersBound) return;
+  heroInlineListenersBound = true;
+
+  // Single-line inputs: Enter saves, Escape cancels
+  ['displayName', 'version', 'author', 'repository'].forEach(fieldName => {
+    const cfg = HERO_FIELDS[fieldName];
+    const el = document.getElementById(cfg.inputId);
+    if (el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveFieldEdit(fieldName, e);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          cancelFieldEdit(fieldName, e);
+        }
+      });
+    }
+  });
+
+  // Description textarea: Ctrl+Enter / Meta+Enter saves, Escape cancels
+  const descEl = document.getElementById('inline-edit-description');
+  if (descEl) {
+    descEl.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        saveFieldEdit('description', e);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelFieldEdit('description', e);
+      }
+    });
+  }
+
+  // Click-outside auto-apply: when clicking anywhere outside the active field's edit box
+  document.addEventListener('pointerdown', (e) => {
+    if (!activeEditingField) return;
+    const cfg = HERO_FIELDS[activeEditingField];
+    if (!cfg) return;
+
+    const editBox = document.getElementById(cfg.editBoxId);
+    // If the click is inside the active edit box, let it proceed normally
+    if (editBox && editBox.contains(e.target)) {
+      return;
+    }
+
+    saveFieldEdit(activeEditingField, null, true);
+  });
+}
+window.setupHeroInlineListeners = setupHeroInlineListeners;
+

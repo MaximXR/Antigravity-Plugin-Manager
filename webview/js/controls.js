@@ -47,7 +47,9 @@ function renderAntigravityProjectsSelector() {
     html += `<optgroup label="${escapeHtml(t('customFoldersGroup', 'Пользовательские папки'))}">`;
     customFoldersList.forEach(c => {
       const isSel = c.id === activeProjectId ? 'selected' : '';
-      html += `<option value="${escapeQuotes(c.id)}" ${isSel} style="background-color: #181825; color: #a5b4fc;">📁 ${escapeHtml(c.name)} [${t('badgeCustomFolder', 'Пользовательская')}]</option>`;
+      const displayPath = c.primaryPath || (c.folders && c.folders[0] ? c.folders[0].fsPath : '');
+      const pathHint = displayPath ? ` (${displayPath})` : '';
+      html += `<option value="${escapeQuotes(c.id)}" ${isSel} title="${escapeQuotes(displayPath)}" style="background-color: #181825; color: #a5b4fc;">📁 ${escapeHtml(c.name)}${escapeHtml(pathHint)} [${t('badgeCustomFolder', 'Пользовательская')}]</option>`;
     });
     html += `</optgroup>`;
   }
@@ -55,7 +57,25 @@ function renderAntigravityProjectsSelector() {
   // 4. Action: Choose custom folder
   html += `<option value="__browse_folder__" style="background-color: #1e1e2e; color: #38bdf8; font-weight: 600;">${escapeHtml(t('optChooseCustomFolder', '📂 + Выбрать другую папку...'))}</option>`;
 
+  // 5. Action: Remove active custom folder if custom is currently active
+  if (activeProjectId && activeProjectId.startsWith('custom:')) {
+    html += `<option value="__remove_current_custom__" style="background-color: #1e1e2e; color: #f87171; font-weight: 500;">${escapeHtml(t('optRemoveCustomFolder', '✕ Убрать текущую папку из списка...'))}</option>`;
+  }
+
   select.innerHTML = html;
+
+  // Set tooltip on select element showing full path of active project
+  let currentActivePath = '';
+  if (activeProjectId) {
+    if (activeProjectId.startsWith('custom:')) {
+      const c = (customFoldersList || []).find(item => item.id === activeProjectId);
+      if (c) currentActivePath = c.primaryPath || (c.folders && c.folders[0] ? c.folders[0].fsPath : '');
+    } else {
+      const p = (antigravityProjectsList || []).find(item => item.id === activeProjectId);
+      if (p) currentActivePath = p.primaryPath || (p.folders && p.folders[0] ? p.folders[0].fsPath : '');
+    }
+  }
+  select.title = currentActivePath || (activeProjectId || '');
 }
 window.renderAntigravityProjectsSelector = renderAntigravityProjectsSelector;
 
@@ -65,6 +85,11 @@ function switchAntigravityProject(projectId) {
     vscode.postMessage({
       command: 'chooseCustomWorkspaceFolder'
     });
+    return;
+  }
+  if (projectId === '__remove_current_custom__') {
+    renderAntigravityProjectsSelector();
+    removeCurrentCustomFolder();
     return;
   }
 
@@ -132,26 +157,43 @@ window.renderMultiRootTargetControls = renderMultiRootTargetControls;
 function renderWorkspaceSelector() {
   const blockEl = document.getElementById('workspace-scope-block');
   const titleLabelEl = document.getElementById('workspace-scope-title-label');
+  const pathEl = document.getElementById('workspace-scope-path');
   const selectEl = document.getElementById('workspace-selector-select');
   const helpEl = document.getElementById('workspace-scope-help');
   const hintEl = document.getElementById('workspace-multi-hint');
+  const removeCustomBtn = document.getElementById('btn-remove-custom-workspace');
   if (!blockEl) return;
 
   if (!workspaceFoldersList || workspaceFoldersList.length === 0) {
     blockEl.style.display = 'none';
     selectedWorkspaceRoot = null;
+    if (pathEl) pathEl.style.display = 'none';
+    if (removeCustomBtn) removeCustomBtn.style.display = 'none';
     renderMultiRootTargetControls();
     return;
   }
 
   blockEl.style.display = 'flex';
-  getActiveWorkspaceRoot();
+  const currentRoot = getActiveWorkspaceRoot();
+
+  // Check if current workspace is a custom user folder
+  const isCustomWorkspace = !!(activeProjectId && activeProjectId.startsWith('custom:')) ||
+    (customFoldersList || []).some(c => c.id === activeProjectId || (currentRoot && normalizePathStr(c.primaryPath) === normalizePathStr(currentRoot)));
+
+  if (removeCustomBtn) {
+    removeCustomBtn.style.display = isCustomWorkspace ? 'inline-flex' : 'none';
+  }
 
   if (workspaceFoldersList.length === 1) {
     const singleWs = workspaceFoldersList[0];
     selectedWorkspaceRoot = singleWs.fsPath;
     if (titleLabelEl) {
       titleLabelEl.textContent = `${t('storageScopeWorkspace', 'Рабочая область')}: ${singleWs.name}`;
+    }
+    if (pathEl) {
+      pathEl.style.display = 'inline-block';
+      pathEl.textContent = singleWs.fsPath;
+      pathEl.title = `${t('clickToOpenFolder', 'Нажмите, чтобы открыть папку в проводнике')}: ${singleWs.fsPath}`;
     }
     if (selectEl) selectEl.style.display = 'none';
     if (helpEl) helpEl.style.display = 'none';
@@ -163,6 +205,15 @@ function renderWorkspaceSelector() {
   // Multi-root workspace
   if (titleLabelEl) {
     titleLabelEl.textContent = `${t('storageScopeWorkspace', 'Рабочая область')}:`;
+  }
+  if (pathEl) {
+    if (selectedWorkspaceRoot) {
+      pathEl.style.display = 'inline-block';
+      pathEl.textContent = selectedWorkspaceRoot;
+      pathEl.title = `${t('clickToOpenFolder', 'Нажмите, чтобы открыть папку в проводнике')}: ${selectedWorkspaceRoot}`;
+    } else {
+      pathEl.style.display = 'none';
+    }
   }
   if (helpEl) {
     helpEl.style.display = 'inline-block';
@@ -184,6 +235,10 @@ function renderWorkspaceSelector() {
 
     selectEl.onchange = (e) => {
       selectedWorkspaceRoot = e.target.value;
+      if (pathEl) {
+        pathEl.textContent = selectedWorkspaceRoot;
+        pathEl.title = `${t('clickToOpenFolder', 'Нажмите, чтобы открыть папку в проводнике')}: ${selectedWorkspaceRoot}`;
+      }
       renderConnectedFolders();
       renderCurrentTab();
     };
@@ -192,6 +247,37 @@ function renderWorkspaceSelector() {
   renderMultiRootTargetControls();
 }
 window.renderWorkspaceSelector = renderWorkspaceSelector;
+
+function openProjectRootFolder() {
+  const wsRoot = getActiveWorkspaceRoot();
+  if (wsRoot) {
+    vscode.postMessage({
+      command: 'openFolder',
+      path: wsRoot,
+      folderPath: wsRoot
+    });
+  }
+}
+window.openProjectRootFolder = openProjectRootFolder;
+
+function removeCurrentCustomFolder() {
+  const currentWs = getActiveWorkspaceRoot();
+  const customItem = (customFoldersList || []).find(c => c.id === activeProjectId || (currentWs && normalizePathStr(c.primaryPath) === normalizePathStr(currentWs)));
+  const folderPath = customItem ? customItem.primaryPath : currentWs;
+  if (!folderPath) return;
+
+  const folderName = customItem ? customItem.name : folderPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || 'folder';
+  const confirmMsg = (t('removeCustomFolderConfirm', 'Убрать пользовательскую папку «{name}» из списка проектов?')).replace('{name}', folderName);
+
+  if (confirm(confirmMsg)) {
+    document.body.classList.add('loading');
+    vscode.postMessage({
+      command: 'removeCustomWorkspaceFolder',
+      folderPath: folderPath
+    });
+  }
+}
+window.removeCurrentCustomFolder = removeCurrentCustomFolder;
 
 function renderConnectedFolders() {
   const globalContainer = document.getElementById('connected-repos-global-container');
@@ -210,18 +296,34 @@ function renderConnectedFolders() {
   const renderChipsHtml = (list) => {
     return list.map(cf => {
       const isPlugin = cf.type === 'plugin' || cf.type === 'plugins';
-      const isGlobal = cf.scope === 'global';
-      const badgeClass = isGlobal ? 'badge-global' : 'badge-workspace';
-      const scopeLabel = isGlobal ? '🌐 Global' : `📁 ${escapeHtml(cf.workspaceName || 'Project')}`;
+      const isMissing = cf.exists === false;
       const typeIcon = isPlugin ? '🔌' : '⚡';
       const typeLabel = isPlugin ? t('tabPlugins', 'Plugins') : t('tabSkills', 'Skills');
       const folderPath = cf.path || cf.physicalPath || cf.configuredPath || '';
       const folderName = cf.folderName || cf.label || (folderPath ? folderPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() : '');
-      const chipTooltip = `${t('clickToOpenFolder', 'Click to open folder in File Explorer')}: ${folderPath} (${scopeLabel} • ${typeLabel})`;
+
+      if (isMissing) {
+        const tooltip = `${t('folderNotFound', 'Папка не найдена')}: ${folderPath}`;
+        return `
+          <div class="repo-chip repo-chip-missing" title="${escapeHtml(tooltip)}">
+            <span class="repo-chip-badge badge-missing">⚠️ ${t('folderNotFound', 'Не найдена')}</span>
+            <span class="repo-chip-icon">${typeIcon}</span>
+            <span class="repo-chip-name">${escapeHtml(folderName)}</span>
+            <span class="repo-chip-path">${escapeHtml(folderPath)}</span>
+            <button class="repo-chip-replace-btn" title="${t('replaceFolderTitle', 'Выбрать новую папку для замены')}" onclick="event.stopPropagation(); replaceConnectedFolder('${escapeQuotes(cf.sourceFile || '')}', '${escapeQuotes(cf.configuredPath || folderPath)}', '${escapeQuotes(cf.workspaceRoot || '')}')">
+              <span>↺ ${t('replaceFolder', 'Заменить')}</span>
+            </button>
+            <button class="repo-chip-disconnect" title="${t('disconnect', 'Disconnect')}" onclick="event.stopPropagation(); disconnectFolder('${escapeQuotes(cf.sourceFile || '')}', '${escapeQuotes(cf.configuredPath || folderPath)}')">×</button>
+          </div>
+        `;
+      }
+
+      const badgeClass = isPlugin ? 'badge-global' : 'badge-workspace';
+      const chipTooltip = `${t('clickToOpenFolder', 'Click to open folder in File Explorer')}: ${folderPath} (${typeLabel})`;
 
       return `
         <div class="repo-chip" title="${escapeHtml(chipTooltip)}" onclick="openConnectedFolder('${escapeQuotes(folderPath)}')">
-          <span class="repo-chip-badge ${badgeClass}">${scopeLabel}</span>
+          <span class="repo-chip-badge ${badgeClass}">${typeLabel}</span>
           <span class="repo-chip-icon">${typeIcon}</span>
           <span class="repo-chip-name">${escapeHtml(folderName)}</span>
           <span class="repo-chip-path">${escapeHtml(folderPath)}</span>
@@ -236,7 +338,7 @@ function renderConnectedFolders() {
       globalContainer.style.display = 'none';
       globalChipsEl.innerHTML = '';
     } else {
-      globalContainer.style.display = 'block';
+      globalContainer.style.display = 'flex';
       globalChipsEl.innerHTML = renderChipsHtml(globalList);
     }
   }
@@ -246,21 +348,8 @@ function renderConnectedFolders() {
       wsContainer.style.display = 'none';
       wsChipsEl.innerHTML = '';
     } else {
-      wsContainer.style.display = 'block';
+      wsContainer.style.display = 'flex';
       wsChipsEl.innerHTML = renderChipsHtml(wsList);
-    }
-  }
-
-  // Fallback for legacy single container if present
-  const fallbackContainer = document.getElementById('connected-repos-container');
-  const fallbackChipsEl = document.getElementById('connected-repos-chips');
-  if (fallbackContainer && fallbackChipsEl) {
-    if (!connectedFoldersList || connectedFoldersList.length === 0) {
-      fallbackContainer.style.display = 'none';
-      fallbackChipsEl.innerHTML = '';
-    } else {
-      fallbackContainer.style.display = 'block';
-      fallbackChipsEl.innerHTML = renderChipsHtml(connectedFoldersList);
     }
   }
 }
@@ -272,6 +361,60 @@ function openConnectedFolder(folderPath) {
   }
 }
 window.openConnectedFolder = openConnectedFolder;
+
+function toggleConnectMenu(scope, event) {
+  if (event) event.stopPropagation();
+  const globalMenu = document.getElementById('connect-menu-global');
+  const projectMenu = document.getElementById('connect-menu-project');
+
+  if (scope === 'global') {
+    if (projectMenu) projectMenu.style.display = 'none';
+    if (globalMenu) {
+      globalMenu.style.display = globalMenu.style.display === 'block' ? 'none' : 'block';
+    }
+  } else {
+    if (globalMenu) globalMenu.style.display = 'none';
+    if (projectMenu) {
+      projectMenu.style.display = projectMenu.style.display === 'block' ? 'none' : 'block';
+    }
+  }
+}
+window.toggleConnectMenu = toggleConnectMenu;
+
+function triggerConnectFolder(type, scope) {
+  const globalMenu = document.getElementById('connect-menu-global');
+  const projectMenu = document.getElementById('connect-menu-project');
+  if (globalMenu) globalMenu.style.display = 'none';
+  if (projectMenu) projectMenu.style.display = 'none';
+
+  if (scope === 'workspace') {
+    const wsRoot = getActiveWorkspaceRoot();
+    vscode.postMessage({ command: 'connectFolder', type, scope: 'workspace', workspaceRoot: wsRoot });
+  } else {
+    vscode.postMessage({ command: 'connectFolder', type, scope: 'global' });
+  }
+}
+window.triggerConnectFolder = triggerConnectFolder;
+
+function replaceConnectedFolder(sourceFile, oldPath, wsRoot) {
+  vscode.postMessage({
+    command: 'replaceConnectedFolder',
+    sourceFile,
+    oldPath,
+    workspaceRoot: wsRoot || getActiveWorkspaceRoot()
+  });
+}
+window.replaceConnectedFolder = replaceConnectedFolder;
+
+// Close connect menus on click outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.connect-dropdown-wrapper')) {
+    const gm = document.getElementById('connect-menu-global');
+    const pm = document.getElementById('connect-menu-project');
+    if (gm) gm.style.display = 'none';
+    if (pm) pm.style.display = 'none';
+  }
+});
 
 function triggerRefresh(btn) {
   document.querySelectorAll('.refresh-spin-icon').forEach(icon => icon.classList.add('rotating'));

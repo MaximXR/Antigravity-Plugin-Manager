@@ -34,20 +34,44 @@ function getCustomFolders() {
       const raw = fs.readFileSync(CUSTOM_FOLDERS_FILE, 'utf8');
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
-        return list
-          .filter((p) => typeof p === 'string' && fs.existsSync(p))
-          .map((p) => {
-            const norm = path.normalize(p);
-            return {
-              id: 'custom:' + norm.toLowerCase(),
-              name: path.basename(norm),
-              folders: [{ name: path.basename(norm), fsPath: norm, branch: null }],
-              primaryPath: norm,
-              isCustom: true,
-              isActive: false,
-              updatedAt: null
-            };
-          });
+        let dirty = false;
+        const validFolders = [];
+        for (const item of list) {
+          if (typeof item !== 'string') {
+            dirty = true;
+            continue;
+          }
+          const trimmed = item.trim();
+          if (!trimmed || trimmed === '.' || trimmed === '..' || !path.isAbsolute(trimmed)) {
+            dirty = true;
+            continue;
+          }
+          const resolved = path.resolve(trimmed);
+          if (!fs.existsSync(resolved)) {
+            dirty = true;
+            continue;
+          }
+          if (!validFolders.includes(resolved)) {
+            validFolders.push(resolved);
+          }
+        }
+        if (dirty) {
+          try {
+            fs.writeFileSync(CUSTOM_FOLDERS_FILE, JSON.stringify(validFolders, null, 2), 'utf8');
+          } catch (_) {}
+        }
+        return validFolders.map((norm) => {
+          const folderName = path.basename(norm) || norm;
+          return {
+            id: 'custom:' + norm.toLowerCase(),
+            name: folderName,
+            folders: [{ name: folderName, fsPath: norm, branch: null }],
+            primaryPath: norm,
+            isCustom: true,
+            isActive: false,
+            updatedAt: null
+          };
+        });
       }
     }
   } catch (_) {}
@@ -58,8 +82,16 @@ function getCustomFolders() {
  * Saves a new custom user workspace folder
  */
 function addCustomFolder(folderPath) {
-  if (!folderPath || !fs.existsSync(folderPath)) return getCustomFolders();
-  const norm = path.normalize(folderPath);
+  if (!folderPath || typeof folderPath !== 'string') return getCustomFolders();
+  const trimmed = folderPath.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..' || !path.isAbsolute(trimmed)) return getCustomFolders();
+  const absPath = path.resolve(trimmed);
+  if (!fs.existsSync(absPath)) return getCustomFolders();
+
+  const appRoot = path.resolve(__dirname, '..');
+  const desktopRoot = path.resolve(__dirname);
+  if (absPath === appRoot || absPath === desktopRoot) return getCustomFolders();
+
   try {
     let existing = [];
     if (fs.existsSync(CUSTOM_FOLDERS_FILE)) {
@@ -68,9 +100,13 @@ function addCustomFolder(folderPath) {
       } catch (_) {}
     }
     if (!Array.isArray(existing)) existing = [];
-    const lower = norm.toLowerCase();
-    if (!existing.some((p) => path.normalize(p).toLowerCase() === lower)) {
-      existing.push(norm);
+    existing = existing
+      .filter((p) => typeof p === 'string' && p.trim() && p.trim() !== '.' && p.trim() !== '..' && path.isAbsolute(p.trim()) && fs.existsSync(path.resolve(p.trim())))
+      .map((p) => path.resolve(p.trim()));
+
+    const lower = absPath.toLowerCase();
+    if (!existing.some((p) => p.toLowerCase() === lower)) {
+      existing.push(absPath);
       fs.mkdirSync(path.dirname(CUSTOM_FOLDERS_FILE), { recursive: true });
       fs.writeFileSync(CUSTOM_FOLDERS_FILE, JSON.stringify(existing, null, 2), 'utf8');
     }
@@ -82,13 +118,19 @@ function addCustomFolder(folderPath) {
  * Removes a custom user workspace folder
  */
 function removeCustomFolder(folderPath) {
-  if (!folderPath) return getCustomFolders();
-  const norm = path.normalize(folderPath).toLowerCase();
+  if (!folderPath || typeof folderPath !== 'string') return getCustomFolders();
+  const trimmed = folderPath.trim();
+  const norm = (path.isAbsolute(trimmed) ? path.resolve(trimmed) : trimmed).toLowerCase();
   try {
     if (fs.existsSync(CUSTOM_FOLDERS_FILE)) {
       let existing = JSON.parse(fs.readFileSync(CUSTOM_FOLDERS_FILE, 'utf8'));
       if (Array.isArray(existing)) {
-        existing = existing.filter((p) => path.normalize(p).toLowerCase() !== norm);
+        existing = existing.filter((p) => {
+          if (typeof p !== 'string') return false;
+          const pTrim = p.trim();
+          if (!pTrim || pTrim === '.' || pTrim === '..' || !path.isAbsolute(pTrim)) return false;
+          return path.resolve(pTrim).toLowerCase() !== norm;
+        });
         fs.writeFileSync(CUSTOM_FOLDERS_FILE, JSON.stringify(existing, null, 2), 'utf8');
       }
     }

@@ -658,8 +658,19 @@ async function simulateIpc(env, message) {
       break;
     }
 
+    case 'savePluginMetadata': {
+      const pluginDir = message.physicalPath || (message.id ? path.join(services.fsUtils.getActivePluginsPath(), message.id) : '');
+      if (pluginDir) {
+        await services.actions.savePluginMetadata(pluginDir, message.metadata || {}, mockVscodeState.activeLanguage || 'en');
+      }
+      const data = collectContextData(env, services);
+      sendToRenderer({ command: 'init', ...data });
+      break;
+    }
+
     case 'editPluginMetadata': {
-      services.fsUtils.writePluginMetaField(message.physicalPath || message.id, message.field, message.currentValue);
+      const val = message.value !== undefined ? message.value : message.currentValue;
+      services.fsUtils.writePluginMetaField(message.physicalPath || message.id, message.field, val);
       const data = collectContextData(env, services);
       sendToRenderer({ command: 'init', ...data });
       break;

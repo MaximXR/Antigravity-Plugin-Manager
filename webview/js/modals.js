@@ -84,6 +84,8 @@ function openCreateModal(presetCategory = null, presetTargetType = null, presetT
   if (verEl) verEl.value = '1.0.0';
   const authEl = document.getElementById('create-author');
   if (authEl) authEl.value = '';
+  const repoEl = document.getElementById('create-repository');
+  if (repoEl) repoEl.value = '';
   
   const scEl = document.getElementById('create-scripts');
   if (scEl) scEl.checked = false;
@@ -115,9 +117,10 @@ function openCreateModal(presetCategory = null, presetTargetType = null, presetT
       const opt = createTargetSelect.options[i];
       const isPluginMatch = presetTargetType === 'plugin' && opt.getAttribute('data-id') === presetTargetId;
       const isWorkspaceMatch = presetTargetType === 'workspace' && opt.getAttribute('data-id') === presetTargetId;
+      const isConnectedMatch = presetTargetType === 'connected' && opt.getAttribute('data-id') === presetTargetId;
       const isGlobalMatch = presetTargetType === 'global';
       
-      if (opt.value === presetTargetType && (isGlobalMatch || isPluginMatch || isWorkspaceMatch)) {
+      if (opt.value === presetTargetType && (isGlobalMatch || isPluginMatch || isWorkspaceMatch || isConnectedMatch)) {
         createTargetSelect.selectedIndex = i;
         break;
       }
@@ -153,6 +156,29 @@ function handleCategoryChange() {
     opt.textContent = optText;
     createTargetSelect.appendChild(opt);
   });
+
+  // Connected folders (from plugins.json / skills.json)
+  const relevantConnected = (connectedFoldersList || []).filter(cf => {
+    if (category === 'plugin') return cf.type === 'plugin' || cf.category === 'plugins';
+    if (category === 'skill') return cf.type === 'skill' || cf.category === 'skills';
+    return false;
+  });
+
+  const seenConnectedPaths = new Set();
+  relevantConnected.forEach(cf => {
+    const cfPath = cf.path || cf.physicalPath || '';
+    const norm = normalizePathStr(cfPath);
+    if (!norm || seenConnectedPaths.has(norm)) return;
+    seenConnectedPaths.add(norm);
+
+    const opt = document.createElement('option');
+    opt.value = 'connected';
+    opt.setAttribute('data-id', cfPath);
+    const scopeLabel = cf.scope === 'global' ? t('scopeGlobalShort', 'Global') : (cf.workspaceName || t('scopeWorkspace', 'Workspace'));
+    const folderName = cf.folderName || cf.label || (cfPath ? cfPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() : '');
+    opt.textContent = `📚 ${t('connectedFolder', 'Подключенная папка')}: ${folderName} (${scopeLabel})`;
+    createTargetSelect.appendChild(opt);
+  });
   
   if (category === 'skill' || category === 'rule') {
     pluginsData.forEach(p => {
@@ -167,24 +193,29 @@ function handleCategoryChange() {
   
   const descLabel = document.getElementById('lbl-desc-field');
   if (descLabel) descLabel.innerHTML = t('labelDescription', 'Description');
+
+  const pluginRepoContainer = document.getElementById('plugin-repo-container');
   
   if (category === 'plugin') {
     if (lblNameField) lblNameField.innerHTML = `${t('labelFolderName', 'Folder Name')} <span style="color: #ef4444;">*</span>`;
     if (fieldFolderNameContainer) fieldFolderNameContainer.style.display = 'flex';
     if (fieldDisplayNameContainer) fieldDisplayNameContainer.style.display = 'flex';
     if (pluginFieldsContainer) pluginFieldsContainer.style.display = 'grid';
+    if (pluginRepoContainer) pluginRepoContainer.style.display = 'flex';
     if (skillFieldsContainer) skillFieldsContainer.style.display = 'none';
   } else if (category === 'skill') {
     if (lblNameField) lblNameField.innerHTML = `${t('labelFolderName', 'Folder Name')} <span style="color: #ef4444;">*</span>`;
     if (fieldFolderNameContainer) fieldFolderNameContainer.style.display = 'flex';
     if (fieldDisplayNameContainer) fieldDisplayNameContainer.style.display = 'flex';
     if (pluginFieldsContainer) pluginFieldsContainer.style.display = 'none';
+    if (pluginRepoContainer) pluginRepoContainer.style.display = 'none';
     if (skillFieldsContainer) skillFieldsContainer.style.display = 'flex';
   } else if (category === 'workflow' || category === 'rule') {
     if (lblNameField) lblNameField.innerHTML = `${t('labelFileName', 'File Name')} <span style="color: #ef4444;">*</span>`;
     if (fieldFolderNameContainer) fieldFolderNameContainer.style.display = 'flex';
     if (fieldDisplayNameContainer) fieldDisplayNameContainer.style.display = 'none';
     if (pluginFieldsContainer) pluginFieldsContainer.style.display = 'none';
+    if (pluginRepoContainer) pluginRepoContainer.style.display = 'none';
     if (skillFieldsContainer) skillFieldsContainer.style.display = 'none';
   }
 }
@@ -210,6 +241,7 @@ function submitCreate() {
   const description = document.getElementById('create-description')?.value.trim() || '';
   const version = document.getElementById('create-version')?.value.trim() || '';
   const author = document.getElementById('create-author')?.value.trim() || '';
+  const repository = document.getElementById('create-repository')?.value.trim() || '';
   const createScripts = !!document.getElementById('create-scripts')?.checked;
   const createExamples = !!document.getElementById('create-examples')?.checked;
   const createDocs = !!document.getElementById('create-docs')?.checked;
@@ -241,6 +273,7 @@ function submitCreate() {
     description,
     version,
     author,
+    repository,
     createScripts,
     createExamples,
     createDocs,
@@ -250,6 +283,33 @@ function submitCreate() {
   closeCreateModal();
 }
 window.submitCreate = submitCreate;
+
+// ─── Edit Plugin In-Place Routing ─────────────────────────────────────────────
+function openEditPluginModal(pluginId, focusField = null) {
+  const targetId = pluginId || activePluginId;
+  if (!targetId) return;
+  if (typeof openPluginDetails === 'function' && targetId !== activePluginId) {
+    openPluginDetails(targetId);
+  }
+  if (typeof enterHeroEditMode === 'function') {
+    enterHeroEditMode(focusField);
+  }
+}
+window.openEditPluginModal = openEditPluginModal;
+
+function closeEditPluginModal() {
+  if (typeof exitHeroEditMode === 'function') {
+    exitHeroEditMode();
+  }
+}
+window.closeEditPluginModal = closeEditPluginModal;
+
+function submitEditPlugin() {
+  if (typeof saveHeroInlineEdit === 'function') {
+    saveHeroInlineEdit();
+  }
+}
+window.submitEditPlugin = submitEditPlugin;
 
 function showCreateError(msg) {
   if (createErrorMsg) {
@@ -644,4 +704,87 @@ function submitMoveItem() {
   });
 }
 window.submitMoveItem = submitMoveItem;
+
+// --- Desktop Application Update Handlers ---
+function showAppUpdateBanner(update) {
+  if (!update || !update.hasUpdate) return;
+  window.appUpdateData = update;
+  const banner = document.getElementById('app-update-banner');
+  if (!banner) return;
+
+  const textEl = document.getElementById('app-update-banner-text');
+  if (textEl) {
+    const rawMsg = t('appUpdateAvailable', 'New desktop app version v{version} is available!');
+    textEl.textContent = rawMsg.replace('{version}', update.remoteVersion);
+  }
+
+  const dlBtnText = document.getElementById('btn-app-update-download-text');
+  if (dlBtnText) {
+    const rawDl = t('appUpdateDownload', 'Download v{version}');
+    dlBtnText.textContent = rawDl.replace('{version}', update.remoteVersion);
+  }
+
+  banner.style.display = 'flex';
+}
+window.showAppUpdateBanner = showAppUpdateBanner;
+
+function dismissAppUpdateBanner() {
+  const banner = document.getElementById('app-update-banner');
+  if (banner) banner.style.display = 'none';
+}
+window.dismissAppUpdateBanner = dismissAppUpdateBanner;
+
+function openAppUpdateModal() {
+  const modal = document.getElementById('app-update-modal');
+  if (!modal) return;
+  const update = window.appUpdateData;
+  if (!update) return;
+
+  const curVerEl = document.getElementById('app-update-current-ver');
+  if (curVerEl) curVerEl.textContent = `v${update.currentVersion}`;
+
+  const newVerEl = document.getElementById('app-update-new-ver');
+  if (newVerEl) newVerEl.textContent = `v${update.remoteVersion}`;
+
+  const notesEl = document.getElementById('app-update-notes-body');
+  if (notesEl) {
+    notesEl.textContent = update.releaseNotes || update.releaseName || '(No release notes)';
+  }
+
+  const modalDlBtn = document.getElementById('btn-app-update-modal-download');
+  if (modalDlBtn) {
+    const rawDl = t('appUpdateDownload', 'Download v{version}');
+    modalDlBtn.textContent = rawDl.replace('{version}', update.remoteVersion);
+  }
+
+  modal.style.display = 'flex';
+}
+window.openAppUpdateModal = openAppUpdateModal;
+
+function closeAppUpdateModal() {
+  const modal = document.getElementById('app-update-modal');
+  if (modal) modal.style.display = 'none';
+}
+window.closeAppUpdateModal = closeAppUpdateModal;
+
+function downloadAppUpdate() {
+  const update = window.appUpdateData;
+  if (!update) return;
+  const targetUrl = update.downloadUrl || update.releaseUrl;
+  if (targetUrl) {
+    vscode.postMessage({ command: 'openExternalUrl', url: targetUrl });
+  }
+}
+window.downloadAppUpdate = downloadAppUpdate;
+
+function openAppUpdateReleasePage() {
+  const update = window.appUpdateData;
+  if (!update) return;
+  const targetUrl = update.releaseUrl || update.downloadUrl;
+  if (targetUrl) {
+    vscode.postMessage({ command: 'openExternalUrl', url: targetUrl });
+  }
+}
+window.openAppUpdateReleasePage = openAppUpdateReleasePage;
+
 
