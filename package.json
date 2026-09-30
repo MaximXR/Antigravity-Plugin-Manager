@@ -2,7 +2,7 @@
   "name": "antigravity-plugin-manager",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.2.27",
+  "version": "1.2.28-dev",
   "publisher": "MaximXR",
   "license": "MIT",
   "repository": {
